@@ -2,7 +2,7 @@
 
 > **全局计划：** 工作区根目录 `FlyPrint开发计划.md` + `FlyPrint任务清单.md`；全量归档 `FlyPrint总开发计划.md`  
 > 目标：2026-07-22 演示收口 · 更新：2026-07-27 · 与 `fly-print-edge/docs/agent/release-plan.md` 同步  
-> **M0 已归档（07-22 verify 通过）。** 当前焦点 **M1 收口**（M1-1 已合入 `main`；当前工作区仍有 Cloud 交付与清理改动待提交/验证）。本文件保留 M0 勾选历史。  
+> **M0 已归档（07-22 verify 通过）。** 当前焦点 **M1 收口**（M1-1 与本轮 Cloud 交付/清理改动已提交 `6e888f3`；Compose update 等待 Docker Desktop 引擎恢复）。本文件保留 M0 勾选历史。  
 > 交付：Cloud + Edge + 可选 Compose Demo + 系统说明 / 部署与验证 / 第三方 Guide  
 > 文档主路径见 `docs/系统说明.md` + `docs/部署与验证.md`；**P0 预演（官方 + Demo）已于 07-22 verify 通过**
 
