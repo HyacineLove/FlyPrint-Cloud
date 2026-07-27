@@ -264,6 +264,7 @@ func (h *PrintJobHandler) ListPrintJobs(c *gin.Context) {
 	status := c.Query("status")
 	printerID := c.Query("printer_id")
 	userID := c.Query("user_id")
+	userEmail := c.Query("user_email")
 	edgeNodeID := c.Query("edge_node_id")
 	initiatorCode := c.Query("initiator_code")
 	if initiatorCode == "" {
@@ -294,7 +295,7 @@ func (h *PrintJobHandler) ListPrintJobs(c *gin.Context) {
 		}
 	}
 
-	jobs, total, err := h.printJobRepo.ListPrintJobsWithTotal(limit, offset, status, printerID, userID, edgeNodeID, initiatorCode, startTime, endTime)
+	jobs, total, err := h.printJobRepo.ListPrintJobsWithTotal(limit, offset, status, printerID, userID, userEmail, edgeNodeID, initiatorCode, startTime, endTime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取打印任务列表失败"})
 		return

@@ -102,8 +102,9 @@ type PrintJob struct {
 	PrinterName string `json:"printer_name,omitempty"` // 打印机名称 (非DB字段，仅用于API返回或内部逻辑)
 	EdgeNodeID  string `json:"edge_node_id,omitempty"` // 所属节点ID（查询时填充）
 	NodeName    string `json:"node_name,omitempty"`    // 节点显示名称（别名优先）
-	UserID      string `json:"user_id"`                // 提交用户
+	UserID      string `json:"user_id"`                // 提交用户（内部兼容主键或第三方标识）
 	UserName    string `json:"user_name"`              // 提交用户名
+	UserEmail   string `json:"user_email,omitempty"`   // 提交用户邮箱（官方用户的稳定业务标识）
 
 	// 任务信息
 	FilePath    string `json:"file_path"`    // 文件路径（本地文件）

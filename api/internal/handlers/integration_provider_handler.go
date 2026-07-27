@@ -61,7 +61,7 @@ func (h *IntegrationProviderHandler) List(c *gin.Context) {
 	for _, provider := range providers {
 		item := providerListItem{IntegrationProvider: provider}
 		if h.printJobRepo != nil {
-			if count, countErr := h.printJobRepo.CountPrintJobsFiltered("", "", "", "", provider.Code, nil, nil); countErr == nil {
+			if count, countErr := h.printJobRepo.CountPrintJobsFiltered("", "", "", "", provider.Code, "", nil, nil); countErr == nil {
 				item.JobCount = count
 			}
 		}
