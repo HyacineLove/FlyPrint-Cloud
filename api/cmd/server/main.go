@@ -355,6 +355,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 				userManagementGroup.POST("", userHandler.CreateUser)
 				userManagementGroup.GET("/:id", userHandler.GetUser)
 				userManagementGroup.PUT("/:id", userHandler.UpdateUser)
+				userManagementGroup.PATCH("/:id/enabled", userHandler.UpdateEnabled)
 				userManagementGroup.DELETE("/:id", userHandler.DeleteUser)
 				userManagementGroup.PUT("/:id/password", userHandler.ChangePassword)
 			}

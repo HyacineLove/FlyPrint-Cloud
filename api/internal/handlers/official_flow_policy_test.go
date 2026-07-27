@@ -53,7 +53,7 @@ func TestOfficialRegistrationCreatesViewerAndReturnsToken(t *testing.T) {
 	builtin := auth.NewBuiltinAuthService(nil, userRepo, &config.OAuth2Config{JWTSigningSecret: "test-signing-secret", JWTTokenExpiry: 3600, JWTIssuer: "test-issuer"})
 	handler := &OAuth2Handler{mode: "builtin", builtinAuth: builtin, userRepo: userRepo}
 
-	emailExists := mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND status = 'active'"))
+	emailExists := mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1)"))
 	emailExists.WithArgs("alice@example.com").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	createUser := mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO users (username, email, password_hash, role, status)"))
 	createUser.WithArgs(sqlmock.AnyArg(), "alice@example.com", sqlmock.AnyArg(), "viewer", "active").WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow("user-1", time.Now(), time.Now()))

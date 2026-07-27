@@ -11,12 +11,13 @@ const (
 	ErrCodeValidationFailed    = 1005
 
 	// 用户相关错误码 (2000-2099)
-	ErrCodeUserNotFound      = 2000
-	ErrCodeUserAlreadyExists = 2001
-	ErrCodeInvalidPassword   = 2002
-	ErrCodeUserCreateFailed  = 2003
-	ErrCodeUserUpdateFailed  = 2004
-	ErrCodeUserDeleteFailed  = 2005
+	ErrCodeUserNotFound           = 2000
+	ErrCodeUserAlreadyExists      = 2001
+	ErrCodeInvalidPassword        = 2002
+	ErrCodeUserCreateFailed       = 2003
+	ErrCodeUserUpdateFailed       = 2004
+	ErrCodeUserDeleteFailed       = 2005
+	ErrCodeUserHasActivePrintJobs = 2006
 
 	// Edge Node 相关错误码 (3000-3099)
 	ErrCodeEdgeNodeNotFound     = 3000
@@ -67,12 +68,13 @@ var errorMessagesZH = map[int]string{
 	ErrCodeValidationFailed:    "字段验证失败",
 
 	// 用户相关
-	ErrCodeUserNotFound:      "用户不存在",
-	ErrCodeUserAlreadyExists: "用户已存在",
-	ErrCodeInvalidPassword:   "密码错误",
-	ErrCodeUserCreateFailed:  "创建用户失败",
-	ErrCodeUserUpdateFailed:  "更新用户失败",
-	ErrCodeUserDeleteFailed:  "删除用户失败",
+	ErrCodeUserNotFound:           "用户不存在",
+	ErrCodeUserAlreadyExists:      "用户已存在",
+	ErrCodeInvalidPassword:        "密码错误",
+	ErrCodeUserCreateFailed:       "创建用户失败",
+	ErrCodeUserUpdateFailed:       "更新用户失败",
+	ErrCodeUserDeleteFailed:       "删除用户失败",
+	ErrCodeUserHasActivePrintJobs: "用户存在打印中的任务，无法删除",
 
 	// Edge Node 相关
 	ErrCodeEdgeNodeNotFound:     "边缘节点不存在",

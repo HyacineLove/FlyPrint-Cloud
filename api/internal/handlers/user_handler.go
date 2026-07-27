@@ -1,6 +1,10 @@
 package handlers
 
 import (
+	"errors"
+	"net/http"
+	"strings"
+
 	"fly-print-cloud/api/internal/database"
 	"fly-print-cloud/api/internal/logger"
 	"fly-print-cloud/api/internal/models"
@@ -26,15 +30,20 @@ func NewUserHandler(userRepo *database.UserRepository) *UserHandler {
 // CreateUserRequest 创建用户请求
 type CreateUserRequest struct {
 	Email    string `json:"email" binding:"required,email"`
+	Username string `json:"username" binding:"required,min=3,max=50"`
 	Password string `json:"password" binding:"required,min=6"`
 	Role     string `json:"role" binding:"required,oneof=admin operator viewer"`
 }
 
 // UpdateUserRequest 更新用户请求
 type UpdateUserRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Role     string `json:"role" binding:"required,oneof=admin operator viewer"`
-	Status   string `json:"status" binding:"required,oneof=active inactive"`
+	Email    *string `json:"email"`
+	Username string  `json:"username" binding:"required,min=3,max=50"`
+	Role     string  `json:"role" binding:"required,oneof=admin operator viewer"`
+}
+
+type UpdateEnabledRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
 }
 
 // ChangePasswordRequest 修改密码请求
@@ -73,11 +82,18 @@ func (h *UserHandler) GetCurrentUserProfile(c *gin.Context) {
 
 // ListUsers 获取用户列表
 func (h *UserHandler) ListUsers(c *gin.Context) {
-	// 获取分页参数
 	page, pageSize, offset := ParsePaginationParams(c)
+	filter := database.UserListFilter{
+		Search:    c.Query("search"),
+		Role:      c.Query("role"),
+		Status:    c.Query("status"),
+		SortBy:    c.Query("sort_by"),
+		SortOrder: c.Query("sort_order"),
+		Offset:    offset,
+		Limit:     pageSize,
+	}
 
-	// 查询用户列表
-	users, total, err := h.userRepo.ListUsers(offset, pageSize)
+	users, total, err := h.userRepo.ListUsers(filter)
 	if err != nil {
 		logger.Error("Failed to list users", zap.Error(err))
 		InternalErrorResponse(c, "获取用户列表失败")
@@ -108,11 +124,21 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		BadRequestResponse(c, "邮箱已存在")
 		return
 	}
+	usernameExists, err := h.userRepo.UsernameExists(req.Username)
+	if err != nil {
+		logger.Error("Failed to check username existence", zap.Error(err))
+		InternalErrorResponse(c, "检查用户名失败")
+		return
+	}
+	if usernameExists {
+		BadRequestResponse(c, "用户名已存在")
+		return
+	}
 
 	// 创建用户
 	user := &models.User{
 		ID:           uuid.New().String(),
-		Username:     security.InternalUsernameForEmail(req.Email),
+		Username:     strings.TrimSpace(req.Username),
 		Email:        req.Email,
 		PasswordHash: req.Password, // 在repository中会被加密
 		Role:         req.Role,
@@ -138,7 +164,7 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.GetUserByID(userID)
+	user, err := h.userRepo.GetUserByIDAnyStatus(userID)
 	if err != nil {
 		NotFoundResponse(c, "用户不存在")
 		return
@@ -161,31 +187,34 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		BadRequestResponse(c, "请求参数无效")
 		return
 	}
+	if req.Email != nil {
+		BadRequestResponse(c, "邮箱不可修改")
+		return
+	}
 
 	// 检查用户是否存在
-	user, err := h.userRepo.GetUserByID(userID)
+	user, err := h.userRepo.GetUserByIDAnyStatus(userID)
 	if err != nil {
 		NotFoundResponse(c, "用户不存在")
 		return
 	}
 
-	// 检查邮箱是否已被其他用户使用
-	req.Email = security.NormalizeEmail(req.Email)
-	exists, err := h.userRepo.EmailExists(req.Email, userID)
+	// 检查用户名是否已被其他用户使用
+	username := strings.TrimSpace(req.Username)
+	exists, err := h.userRepo.UsernameExists(username, userID)
 	if err != nil {
-		logger.Error("Failed to check email existence", zap.Error(err))
-		InternalErrorResponse(c, "检查邮箱失败")
+		logger.Error("Failed to check username existence", zap.Error(err))
+		InternalErrorResponse(c, "检查用户名失败")
 		return
 	}
 	if exists {
-		BadRequestResponse(c, "邮箱已被其他用户使用")
+		BadRequestResponse(c, "用户名已被其他用户使用")
 		return
 	}
 
 	// 更新用户信息
-	user.Email = req.Email
+	user.Username = username
 	user.Role = req.Role
-	user.Status = req.Status
 
 	if err := h.userRepo.UpdateUser(user); err != nil {
 		logger.Error("Failed to update user", zap.String("user_id", userID), zap.Error(err))
@@ -193,15 +222,35 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	userInfo := models.User{
-		ID:       user.ID,
-		Username: user.Username,
-		Email:    user.Email,
-		Role:     user.Role,
+	logger.Info("User updated successfully", zap.String("email", user.Email))
+	SuccessResponse(c, user)
+}
+
+// UpdateEnabled 更新用户启用状态；停用不删除任务和文件。
+func (h *UserHandler) UpdateEnabled(c *gin.Context) {
+	userID := c.Param("id")
+	if userID == "" {
+		BadRequestResponse(c, "用户ID不能为空")
+		return
 	}
 
-	logger.Info("User updated successfully", zap.String("email", user.Email))
-	SuccessResponse(c, userInfo)
+	var req UpdateEnabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequestResponse(c, "请求参数无效")
+		return
+	}
+
+	user, err := h.userRepo.UpdateEnabled(userID, *req.Enabled)
+	if err != nil {
+		if strings.Contains(err.Error(), "user not found") {
+			NotFoundWithCode(c, ErrCodeUserNotFound)
+			return
+		}
+		logger.Error("Failed to update user status", zap.String("user_id", userID), zap.Error(err))
+		InternalErrorWithCode(c, ErrCodeUserUpdateFailed)
+		return
+	}
+	SuccessResponse(c, user)
 }
 
 // DeleteUser 删除用户
@@ -212,34 +261,39 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	// 获取当前操作用户ID
-	currentUserID, exists := c.Get("user_id")
+	// builtin JWT 的 sub 由认证中间件写入 external_id。
+	currentUserID, exists := c.Get("external_id")
 	if !exists {
+		UnauthorizedResponse(c, "未找到当前用户信息")
+		return
+	}
+	currentUserIDString, ok := currentUserID.(string)
+	if !ok || currentUserIDString == "" {
 		UnauthorizedResponse(c, "未找到当前用户信息")
 		return
 	}
 
 	// 不能删除自己
-	if userID == currentUserID.(string) {
+	if userID == currentUserIDString {
 		BadRequestResponse(c, "不能删除自己")
 		return
 	}
 
-	// 检查用户是否存在
-	user, err := h.userRepo.GetUserByID(userID)
-	if err != nil {
-		NotFoundResponse(c, "用户不存在")
-		return
-	}
-
-	// 删除用户（软删除）
-	if err := h.userRepo.DeleteUser(userID); err != nil {
+	if err := h.userRepo.DeleteUserWithPrintJobs(userID); err != nil {
+		if errors.Is(err, database.ErrUserHasActivePrintJobs) {
+			ErrorResponseWithCode(c, http.StatusConflict, ErrCodeUserHasActivePrintJobs, GetErrorMessage(ErrCodeUserHasActivePrintJobs))
+			return
+		}
+		if strings.Contains(err.Error(), "user not found") {
+			NotFoundWithCode(c, ErrCodeUserNotFound)
+			return
+		}
 		logger.Error("Failed to delete user", zap.String("user_id", userID), zap.Error(err))
-		InternalErrorResponse(c, "删除用户失败")
+		InternalErrorWithCode(c, ErrCodeUserDeleteFailed)
 		return
 	}
 
-	logger.Info("User deleted successfully", zap.String("username", user.Username))
+	logger.Info("User deleted successfully", zap.String("user_id", userID))
 	SuccessResponse(c, gin.H{"message": "用户删除成功"})
 }
 
