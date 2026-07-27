@@ -10,7 +10,13 @@ import { RelationStack } from '../RelationLinks';
 interface EdgeNode {
   id: string; name: string; alias?: string; location?: string; connection_status: string;
   health_status: string; health_message?: string; enabled: boolean; last_heartbeat?: string;
-  version?: string; registration_state: string; ops_contact_count?: number; printer_count?: number; job_count?: number;
+  version?: string; registration_state: string; login_source?: string; ops_contact_count?: number; printer_count?: number; job_count?: number;
+}
+
+interface IntegrationProvider {
+  code: string;
+  display_name: string;
+  enabled: boolean;
 }
 
 async function request(path: string, init?: RequestInit) {
@@ -32,7 +38,9 @@ const EdgeNodes: React.FC = () => {
   const navigate = useNavigate();
   const nodeFilter = searchParams.get('node_id') || '';
   const [nodes, setNodes] = useState<EdgeNode[]>([]);
+  const [providers, setProviders] = useState<IntegrationProvider[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingLoginSource, setSavingLoginSource] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [alias, setAlias] = useState('');
   const [activation, setActivation] = useState<{ code: string; expiresAt: string } | null>(null);
@@ -41,7 +49,14 @@ const EdgeNodes: React.FC = () => {
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>();
 
   const load = useCallback(async () => {
-    try { const data = await request('/admin/edge-nodes?page=1&page_size=100'); setNodes(data?.items || []); }
+    try {
+      const [nodeData, providerData] = await Promise.all([
+        request('/admin/edge-nodes?page=1&page_size=100'),
+        request('/admin/integration-providers'),
+      ]);
+      setNodes(nodeData?.items || []);
+      setProviders(providerData || []);
+    }
     catch { message.error('节点信息加载失败'); }
     finally { setLoading(false); }
   }, []);
@@ -79,6 +94,18 @@ const EdgeNodes: React.FC = () => {
   const toggle = async (node: EdgeNode, enabled: boolean) => {
     try { await request(`/admin/edge-nodes/${node.id}/enabled`, { method: 'PATCH', body: JSON.stringify({ enabled }) }); load(); }
     catch { message.error('状态更新失败'); }
+  };
+  const saveLoginSource = async (node: EdgeNode, loginSource: string) => {
+    setSavingLoginSource(node.id);
+    try {
+      const data = await request(`/admin/edge-nodes/${node.id}/login-source`, {
+        method: 'PATCH',
+        body: JSON.stringify({ login_source: loginSource }),
+      });
+      setNodes(current => current.map(item => item.id === node.id ? { ...item, login_source: data?.login_source || loginSource } : item));
+      message.success('登录源已保存');
+    } catch { message.error('登录源保存失败'); }
+    finally { setSavingLoginSource(null); }
   };
   const remove = (node: EdgeNode) => Modal.confirm({
     title: '删除节点？', content: `删除后该节点的专属凭据将失效，节点需要重新激活。\n${node.id}`,
@@ -121,6 +148,28 @@ const EdgeNodes: React.FC = () => {
     },
     { title: '节点最后心跳', dataIndex: 'last_heartbeat', width: 150, sorter: (a, b) => String(a.last_heartbeat || '').localeCompare(String(b.last_heartbeat || '')), render: value => <DateTimeValue value={value} /> },
     { title: '节点版本', dataIndex: 'version', width: 90, sorter: (a, b) => (a.version || '').localeCompare(b.version || ''), render: value => value || '-' },
+    {
+      title: '登录源',
+      width: 180,
+      render: (_, node) => (
+        <Select
+          data-testid={`node-login-source-${node.id}`}
+          aria-label={`节点 ${node.alias || node.name || node.id} 登录源`}
+          value={node.login_source || 'official'}
+          loading={savingLoginSource === node.id}
+          style={{ minWidth: 150 }}
+          options={[
+            { value: 'official', label: '官方入口' },
+            ...providers.map(provider => ({
+              value: provider.code,
+              label: provider.display_name,
+              disabled: !provider.enabled,
+            })),
+          ]}
+          onChange={value => saveLoginSource(node, value)}
+        />
+      ),
+    },
     { title: '节点启用状态', width: 105, render: (_, node) => <Switch checked={node.enabled} disabled={node.registration_state === 'pending_activation'} onChange={value => toggle(node, value)} /> },
     { title: '', width: 70, render: (_, node) => <Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(node)} /> },
   ];
@@ -142,7 +191,7 @@ const EdgeNodes: React.FC = () => {
       </Space>
       <Button type="primary" icon={<PlusOutlined />} onClick={createActivation}>创建待激活终端</Button>
     </div>
-    <Card><Table rowKey="id" loading={loading} dataSource={visibleNodes} columns={columns} scroll={{ x: 1400 }} pagination={{ pageSize: 20, showSizeChanger: false }} /></Card>
+    <Card><Table rowKey="id" loading={loading} dataSource={visibleNodes} columns={columns} scroll={{ x: 1560 }} pagination={{ pageSize: 20, showSizeChanger: false }} /></Card>
     <Modal open={!!activation} footer={<Button type="primary" onClick={() => setActivation(null)}>我已保存</Button>} closable={false} title="一次性激活码">
       <Typography.Paragraph>请在 Edge 的初始激活界面填写 Cloud URL 和以下激活码。激活码仅显示一次，10 分钟后失效。</Typography.Paragraph>
       <Typography.Title level={3} copyable={{ text: activation?.code }}>{activation?.code}</Typography.Title>
