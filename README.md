@@ -178,6 +178,16 @@ Edge 使用 OAuth2 `client_credentials` 获取访问令牌。实际 scope 由 Cl
 
 ### REST 摘要
 
+### 用户管理运维约定
+
+- 用户邮箱是不可修改的登录名和业务筛选标识；数据库 `users.id` 仅作为内部兼容主键，继续供 JWT、文件和打印任务关联使用。
+- 用户名与邮箱分离。用户名可以在用户管理表格中单击修改，也可以在编辑窗口中修改；修改不会改变邮箱标识。
+- 用户状态通过“启用”开关管理，停用账号不能登录，但不会删除其文件或打印任务；停用账号仍可被管理员筛选并恢复。
+- 删除与停用是两个独立操作。删除前由 Cloud 在事务中检查 `pending`、`dispatched`、`processing` 任务；存在上述任务时返回 HTTP 409 和 `用户存在打印中的任务，无法删除`，不执行删除。
+- 无活动打印任务时，删除会级联删除该用户的打印任务及任务告警，但不会删除上传文件。
+- 用户管理接口：`PATCH /api/v1/admin/users/:id/enabled`、`PUT /api/v1/admin/users/:id`、`DELETE /api/v1/admin/users/:id`。这些接口只允许管理员调用。
+- 打印任务列表按 `user_email` 筛选，并显示邮箱及灰色用户名。用户管理中的邮箱可跳转到打印任务筛选，打印任务中的邮箱可跳回用户管理。
+
 - `POST /api/v1/edge/register`：注册 Edge 节点；
 - `POST /api/v1/edge/{node_id}/printers`：注册打印机；
 - `DELETE /api/v1/edge/{node_id}/printers/{printer_id}`：删除打印机；
