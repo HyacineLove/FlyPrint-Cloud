@@ -107,6 +107,35 @@ func TestOpsContactRepositorySoftDeleteClearsBindings(t *testing.T) {
 	}
 }
 
+func TestOpsContactRepositoryClearBindingsForNodeTx(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	repo := NewOpsContactRepository(&DB{DB: sqlDB})
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM node_ops_contacts WHERE edge_node_id = $1`)).
+		WithArgs("node-1").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+
+	tx, err := (&DB{DB: sqlDB}).BeginTx()
+	if err != nil {
+		t.Fatalf("BeginTx() error = %v", err)
+	}
+	if err := repo.ClearBindingsForNodeTx(tx, "node-1"); err != nil {
+		t.Fatalf("ClearBindingsForNodeTx() error = %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpsContactRepositoryCreate(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {

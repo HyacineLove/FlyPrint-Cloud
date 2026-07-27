@@ -27,7 +27,7 @@ import OpsContacts from './components/pages/OpsContacts';
 // 导入错误边界和工具
 import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
-import { buildAuthUrl } from './config';
+import { buildAuthUrl, buildAppPath, APP_BASENAME } from './config';
 
 const { Header, Sider, Content } = Layout;
 
@@ -56,7 +56,7 @@ const AdminApp: React.FC = () => {
         
         // 检查 HTTP 状态码，如果是 401 未授权，直接跳转登录
         if (response.status === 401 || !response.ok) {
-          window.location.href = '/login';
+          window.location.href = buildAppPath('/login');
           return;
         }
         
@@ -72,12 +72,12 @@ const AdminApp: React.FC = () => {
           });
         } else {
           // 如果获取用户信息失败，重定向到登录页面
-          window.location.href = '/login';
+          window.location.href = buildAppPath('/login');
         }
       } catch (error) {
         console.error('获取用户信息失败:', error);
         // 任何错误都重定向到登录页面（无需延迟）
-        window.location.href = '/login';
+        window.location.href = buildAppPath('/login');
       } finally {
         setLoading(false);
       }
@@ -93,7 +93,7 @@ const AdminApp: React.FC = () => {
     } catch (error) {
       console.error('登出失败:', error);
     } finally {
-      window.location.href = '/login';
+      window.location.href = buildAppPath('/login');
     }
   };
 
@@ -247,7 +247,7 @@ const AdminApp: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
-      <Router>
+      <Router basename={APP_BASENAME || undefined}>
         <Routes>
           {/* 独立的文件上传页面，不需要 Admin 登录 */}
           <Route path="/upload" element={<PublicUpload />} />

@@ -1,4 +1,5 @@
 import { message } from 'antd';
+import { buildAppPath } from '../config';
 
 // 错误类型
 export enum ErrorType {
@@ -69,7 +70,8 @@ export class ErrorHandler {
     if (errorType === ErrorType.AUTH) {
       message.error('登录已过期，请重新登录');
       setTimeout(() => {
-        window.location.href = '/auth/login';
+        // SPA 登录页（builtin）；子路径部署由 buildAppPath 带前缀
+        window.location.href = buildAppPath('/login');
       }, 1500);
       return;
     }

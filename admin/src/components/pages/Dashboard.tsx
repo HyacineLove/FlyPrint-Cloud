@@ -4,7 +4,7 @@ import { Card, Col, Collapse, Empty, Row, Segmented, Space, Table, Tooltip, Typo
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { CloudServerOutlined, FileTextOutlined, PrinterOutlined } from '@ant-design/icons';
 import { buildApiUrl, buildAuthUrl } from '../../config';
-import { DateTimeValue, TwoLineValue } from '../DisplayValue';
+import { DateTimeValue, TwoLineLink, TwoLineValue } from '../DisplayValue';
 
 interface TrendBucket { label: string; completed: number; failed: number; }
 interface Overview { fault_nodes: number; online_nodes: number; total_nodes: number; fault_printers: number; online_printers: number; total_printers: number; }
@@ -35,6 +35,10 @@ const axisLabel = (period: string, label: string) => {
 };
 
 const resourceCell = (id?: string, name?: string) => <TwoLineValue id={id} name={name} />;
+const nodeCell = (id?: string, name?: string) =>
+  id ? <TwoLineLink to={`/edge-nodes?node_id=${encodeURIComponent(id)}`} id={id} name={name} /> : resourceCell(id, name);
+const printerCell = (id?: string, name?: string) =>
+  id ? <TwoLineLink to={`/printers?printer_id=${encodeURIComponent(id)}`} id={id} name={name} /> : resourceCell(id, name);
 
 const TrendChart: React.FC<{ buckets: TrendBucket[]; period: string }> = ({ buckets, period }) => {
   const element = useRef<HTMLDivElement>(null);
@@ -109,8 +113,8 @@ const Dashboard: React.FC = () => {
 
   const taskSummary = taskTrends.reduce((summary, item) => ({ completed: summary.completed + item.completed, failed: summary.failed + item.failed }), { completed: 0, failed: 0 });
   const currentColumns: ColumnsType<AlertRecord> = [
-    { title: '节点', key: 'node', width: 220, render: (_, row) => resourceCell(row.node_id || (row.resource_type === 'node' ? row.resource_id : undefined), row.node_name) },
-    { title: '打印机', key: 'printer', width: 220, render: (_, row) => resourceCell(row.printer_id || (row.resource_type === 'printer' ? row.resource_id : undefined), row.printer_name) },
+    { title: '节点', key: 'node', width: 220, render: (_, row) => nodeCell(row.node_id || (row.resource_type === 'node' ? row.resource_id : undefined), row.node_name) },
+    { title: '打印机', key: 'printer', width: 220, render: (_, row) => printerCell(row.printer_id || (row.resource_type === 'printer' ? row.resource_id : undefined), row.printer_name) },
     { title: '任务', key: 'job', width: 220, render: (_, row) => resourceCell(row.job_id || (row.resource_type === 'job' ? row.resource_id : undefined), row.job_name) },
     { title: '问题', dataIndex: 'title', width: 220, render: value => <Tooltip title={value}>{value}</Tooltip> },
     { title: '起始时间', dataIndex: 'first_seen_at', width: 180, render: value => <DateTimeValue value={value} /> },

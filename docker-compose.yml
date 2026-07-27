@@ -182,6 +182,8 @@ services:
         - REACT_APP_API_BASE_PATH=${REACT_APP_API_BASE_PATH:-}
         - REACT_APP_AUTH_BASE_PATH=${REACT_APP_AUTH_BASE_PATH:-}
         - REACT_APP_API_URL=${REACT_APP_API_URL:-}
+        - REACT_APP_BASENAME=${REACT_APP_BASENAME:-}
+        - PUBLIC_URL=${PUBLIC_URL:-}
     container_name: fly-print-admin-builder
     volumes:
       - admin_build:/app/build

@@ -162,6 +162,17 @@ func (r *OpsContactRepository) SoftDelete(id string) error {
 	return err
 }
 
+// ClearBindingsForNodeTx removes all ops-contact bindings for a node.
+// Soft-deleting edge_nodes does not fire ON DELETE CASCADE, so callers must
+// clear bindings explicitly before (or with) node soft-delete.
+func (r *OpsContactRepository) ClearBindingsForNodeTx(tx *Tx, nodeID string) error {
+	_, err := tx.Exec(`DELETE FROM node_ops_contacts WHERE edge_node_id = $1`, nodeID)
+	if err != nil {
+		return fmt.Errorf("clear ops contact bindings for node: %w", err)
+	}
+	return nil
+}
+
 func (r *OpsContactRepository) UpdateEnabled(id string, enabled bool) (*models.OpsContact, error) {
 	contact := &models.OpsContact{}
 	err := r.db.QueryRow(`

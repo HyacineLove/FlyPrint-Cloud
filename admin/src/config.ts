@@ -7,6 +7,8 @@
 // 约定环境变量（按优先级从高到低）：
 // - REACT_APP_API_BASE_PATH：如 /api/v1 或 /fly-print-api/api/v1
 // - REACT_APP_API_URL：旧配置兼容（如 http://host/fly-print-api），只取路径部分
+// - REACT_APP_AUTH_BASE_PATH：如 /auth 或 /fly-print-api/auth
+// - REACT_APP_BASENAME / PUBLIC_URL：SPA 子路径前缀，如 /fly-print-web（根路径部署留空）
 // - 默认值：/api/v1
 
 const getEnv = (key: string): string | undefined => {
@@ -59,6 +61,16 @@ const AUTH_BASE_PATH = normalizeBasePath(
   '/auth'
 );
 
+// SPA 挂载前缀：子路径部署时与 PUBLIC_URL 一致（如 /fly-print-web）；根路径为空
+const rawBasename =
+  getEnv('REACT_APP_BASENAME') ||
+  getEnv('PUBLIC_URL') ||
+  '';
+const APP_BASENAME =
+  !rawBasename || rawBasename === '/'
+    ? ''
+    : normalizeBasePath(rawBasename, '');
+
 // 构造 API 完整路径：buildApiUrl('admin/printers') -> /api/v1/admin/printers
 export const buildApiUrl = (path: string): string => {
   const p = path.startsWith('/') ? path.slice(1) : path;
@@ -71,5 +83,13 @@ export const buildAuthUrl = (path: string): string => {
   return `${AUTH_BASE_PATH}/${p}`;
 };
 
-export { API_BASE_PATH, AUTH_BASE_PATH };
+// 构造前端路由绝对路径（含 basename）：buildAppPath('/login') -> /fly-print-web/login
+export const buildAppPath = (path: string): string => {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  if (!APP_BASENAME) return p || '/';
+  if (p === '/') return APP_BASENAME;
+  return `${APP_BASENAME}${p}`;
+};
+
+export { API_BASE_PATH, AUTH_BASE_PATH, APP_BASENAME };
 

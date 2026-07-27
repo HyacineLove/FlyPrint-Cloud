@@ -588,13 +588,21 @@ func (h *EdgeNodeHandler) DeleteEdgeNode(c *gin.Context) {
 			return
 		}
 	}
+	// Soft-delete does not fire FK ON DELETE CASCADE; clear ops bindings now.
+	if h.opsContactRepo != nil {
+		if err := h.opsContactRepo.ClearBindingsForNodeTx(tx, nodeID); err != nil {
+			logger.Error("Failed to clear ops contact bindings for node", zap.String("node_id", nodeID), zap.Error(err))
+			InternalErrorResponse(c, "取消运维人员节点绑定失败")
+			return
+		}
+	}
 
 	// 2. 清理告警并软删除该节点下打印机。打印机不能硬删除，因为历史
 	// terminal_tickets 仍通过外键引用它们。
 	if h.alertRepo != nil {
 		if err := h.alertRepo.DeleteForNodeTx(tx, nodeID); err != nil {
 			logger.Error("Failed to delete alerts for node", zap.String("node_id", nodeID), zap.Error(err))
-			InternalErrorResponse(c, "鍒犻櫎鑺傜偣鍛婅澶辫触")
+			InternalErrorResponse(c, "删除节点告警失败")
 			return
 		}
 	}

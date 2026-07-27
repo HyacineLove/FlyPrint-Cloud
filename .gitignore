@@ -37,3 +37,8 @@ admin/npm-debug.log*
 admin/.cache/
 api/tests/__pycache__/
 nul
+
+# Release deploy bundle (local secrets / large artifacts; do not commit)
+deploy/release/.env
+deploy/release/CREDENTIALS.txt
+deploy/release/flyprint-images.tar

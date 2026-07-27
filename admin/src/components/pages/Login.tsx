@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, Card, message, Typography, Spin } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { buildAuthUrl } from '../../config';
+import { buildAuthUrl, buildAppPath } from '../../config';
 import { mapApiError } from '../../utils/mapApiError';
 
 const { Title, Text } = Typography;
@@ -62,8 +62,8 @@ const Login: React.FC = () => {
         document.cookie = `access_token=${result.access_token}; path=/; expires=${expiresDate.toUTCString()}`;
         
         message.success('登录成功');
-        // Redirect to dashboard
-        window.location.href = '/';
+        // Redirect to dashboard（子路径部署时带 basename）
+        window.location.href = buildAppPath('/');
       } else {
         message.error(mapApiError(result, '登录失败'));
       }
