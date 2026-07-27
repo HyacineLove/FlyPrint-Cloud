@@ -23,13 +23,14 @@ type EdgeNodeHandler struct {
 	wsManager           *websocket.ConnectionManager
 	tokenUsageRepo      *database.TokenUsageRepository
 	alertRepo           *database.OperationalAlertRepository
+	providerRepo        *database.IntegrationProviderRepository
 	tickets             *database.TerminalTicketRepository
 	uploadSessions      *database.TerminalUploadSessionRepository
 	integrationRequests *database.IntegrationPrintRequestRepository
 }
 
 // NewEdgeNodeHandler 创建 Edge Node 管理处理器
-func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, integrationRequests *database.IntegrationPrintRequestRepository, opsContactRepo *database.OpsContactRepository) *EdgeNodeHandler {
+func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, integrationRequests *database.IntegrationPrintRequestRepository, opsContactRepo *database.OpsContactRepository, providerRepo *database.IntegrationProviderRepository) *EdgeNodeHandler {
 	return &EdgeNodeHandler{
 		db:                  db,
 		edgeNodeRepo:        edgeNodeRepo,
@@ -42,6 +43,7 @@ func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeReposito
 		tickets:             tickets,
 		uploadSessions:      uploadSessions,
 		integrationRequests: integrationRequests,
+		providerRepo:        providerRepo,
 	}
 }
 
@@ -86,6 +88,10 @@ type UpdateEdgeNodeEnabledRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+type UpdateEdgeNodeLoginSourceRequest struct {
+	LoginSource string `json:"login_source" binding:"required"`
+}
+
 // EdgeNodeInfo Edge Node 信息响应
 // ProvisionEdgeNodeRequest creates the server-side identity before an Edge is
 // installed. The administrator then creates one OAuth client bound to the
@@ -99,6 +105,7 @@ type EdgeNodeInfo struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Alias             string    `json:"alias,omitempty"`
+	LoginSource       string    `json:"login_source"`
 	RegistrationState string    `json:"registration_state"`
 	ConnectionStatus  string    `json:"connection_status"`
 	HealthStatus      string    `json:"health_status"`
@@ -201,6 +208,7 @@ func (h *EdgeNodeHandler) RegisterEdgeNode(c *gin.Context) {
 		ID:                node.ID,
 		Name:              node.Name,
 		Alias:             node.Alias,
+		LoginSource:       node.LoginSource,
 		RegistrationState: node.RegistrationState,
 		ConnectionStatus:  node.ConnectionStatus,
 		HealthStatus:      node.HealthStatus,
@@ -303,6 +311,7 @@ func (h *EdgeNodeHandler) ListEdgeNodes(c *gin.Context) {
 			ID:                node.ID,
 			Name:              node.Name,
 			Alias:             node.Alias,
+			LoginSource:       node.LoginSource,
 			RegistrationState: node.RegistrationState,
 			ConnectionStatus:  node.ConnectionStatus,
 			HealthStatus:      node.HealthStatus,
@@ -370,6 +379,7 @@ func (h *EdgeNodeHandler) GetEdgeNode(c *gin.Context) {
 		ID:                node.ID,
 		Name:              node.Name,
 		Alias:             node.Alias,
+		LoginSource:       node.LoginSource,
 		RegistrationState: node.RegistrationState,
 		ConnectionStatus:  node.ConnectionStatus,
 		HealthStatus:      node.HealthStatus,
@@ -468,6 +478,7 @@ func (h *EdgeNodeHandler) UpdateEdgeNode(c *gin.Context) {
 		ID:                node.ID,
 		Name:              node.Name,
 		Alias:             node.Alias,
+		LoginSource:       node.LoginSource,
 		RegistrationState: node.RegistrationState,
 		ConnectionStatus:  node.ConnectionStatus,
 		HealthStatus:      node.HealthStatus,
@@ -529,7 +540,34 @@ func (h *EdgeNodeHandler) UpdateEnabled(c *gin.Context) {
 	if !req.Enabled && h.tokenUsageRepo != nil {
 		_, _ = h.tokenUsageRepo.RevokeTokensByNodeAndType("upload", c.Param("id"))
 	}
+	if !req.Enabled && h.uploadSessions != nil {
+		_ = h.uploadSessions.DeleteForNode(c.Param("id"))
+	}
 	SuccessResponse(c, gin.H{"id": c.Param("id"), "enabled": req.Enabled})
+}
+
+func (h *EdgeNodeHandler) UpdateLoginSource(c *gin.Context) {
+	var req UpdateEdgeNodeLoginSourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil || !isValidTerminalLoginSource(req.LoginSource) {
+		BadRequestResponse(c, "invalid terminal login source")
+		return
+	}
+	if req.LoginSource != "official" {
+		if h.providerRepo == nil {
+			InternalErrorResponse(c, "provider repository unavailable")
+			return
+		}
+		provider, err := h.providerRepo.Get(req.LoginSource, false)
+		if err != nil || provider == nil || !provider.Enabled {
+			BadRequestResponse(c, "terminal login provider is not enabled")
+			return
+		}
+	}
+	if err := h.edgeNodeRepo.UpdateLoginSource(c.Param("id"), req.LoginSource); err != nil {
+		NotFoundResponse(c, "Edge Node not found")
+		return
+	}
+	SuccessResponse(c, gin.H{"id": c.Param("id"), "login_source": req.LoginSource})
 }
 
 // DeleteEdgeNode 删除 Edge Node

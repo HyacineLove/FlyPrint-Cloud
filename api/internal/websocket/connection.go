@@ -299,6 +299,11 @@ func (c *Connection) handleTerminalSessionState(msg *Message) {
 				logger.Warn("Failed to cancel terminal tickets on session refresh", zap.String("node_id", c.NodeID), zap.Error(err))
 			}
 		}
+		if c.UploadSessions != nil {
+			if err := c.UploadSessions.DeleteForNode(c.NodeID); err != nil {
+				logger.Warn("Failed to revoke upload sessions on terminal refresh", zap.String("node_id", c.NodeID), zap.Error(err))
+			}
+		}
 		if c.Manager != nil {
 			c.Manager.ClearTerminalOccupied(c.NodeID)
 		}
@@ -457,6 +462,29 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 	if file == nil {
 		logger.Warn("File not found", zap.String("file_id", payload.FileID))
 		return
+	}
+	if c.UploadSessions != nil {
+		binding, bindingErr := c.UploadSessions.GetByFileID(file.ID)
+		if bindingErr != nil {
+			logger.Warn("Failed to load official terminal binding", zap.String("file_id", file.ID), zap.Error(bindingErr))
+			c.sendError("terminal_session_invalid", "Terminal session is no longer valid", payload.PrinterID)
+			return
+		}
+		if binding != nil {
+			if payload.TerminalSessionID == "" || payload.TerminalTicketHash == "" || payload.TerminalSessionID != binding.SessionID || payload.TerminalTicketHash != binding.TicketHash {
+				c.sendError("terminal_session_invalid", "Terminal session is no longer valid", payload.PrinterID)
+				return
+			}
+			if c.TerminalSessions == nil {
+				c.sendError("terminal_session_invalid", "Terminal session is no longer valid", payload.PrinterID)
+				return
+			}
+			matched, matchErr := c.TerminalSessions.Matches(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash, "")
+			if matchErr != nil || !matched {
+				c.sendError("terminal_session_invalid", "Terminal session is no longer valid", payload.PrinterID)
+				return
+			}
+		}
 	}
 
 	// 重新生成文件URL（因为DB不存储URL）

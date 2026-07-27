@@ -4,6 +4,7 @@ import { CheckCircleOutlined, FileOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { apiService } from '../../services/api';
 import { UploadPolicy, uploadService } from '../../services/upload';
+import { buildAppPath } from '../../config';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -217,6 +218,12 @@ const PublicUpload: React.FC = () => {
 
     const loadPage = async () => {
       try {
+        const authToken = await apiService.getToken();
+        if (!authToken) {
+          const returnTo = `${window.location.pathname}${window.location.search}`;
+          window.location.assign(`${buildAppPath('/login')}?return_to=${encodeURIComponent(returnTo)}`);
+          return;
+        }
         const [uploadPolicy, uploadSession] = await Promise.all([
           uploadService.getPolicy(),
           uploadService.verifySession(tokenParam, nodeIdParam, printerIdParam),

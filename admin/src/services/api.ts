@@ -133,7 +133,7 @@ class ApiService {
     formData.append('file', file);
     
     try {
-      // 如果提供了上传凭证，使用 token 查询参数，不需要 OAuth2 认证
+      // 官方终端上传同时携带 terminal token 与官方账号 JWT。
       if (uploadToken) {
         let url = buildApiUrl(`/files?token=${encodeURIComponent(uploadToken)}`);
         if (nodeId) {
@@ -143,8 +143,10 @@ class ApiService {
           url += `&printer_id=${encodeURIComponent(printerId)}`;
         }
         
+        const authToken = await this.getToken();
         const response = await fetch(url, {
           method: 'POST',
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
           body: formData,
         });
         

@@ -132,6 +132,7 @@ func (db *DB) InitTables() error {
 	CREATE TABLE IF NOT EXISTS edge_nodes (
 		id VARCHAR(100) PRIMARY KEY,
 		name VARCHAR(100) NOT NULL, -- User-friendly display name (can be modified)
+		login_source VARCHAR(100) NOT NULL DEFAULT 'official',
 		status VARCHAR(20) NOT NULL DEFAULT 'offline',
 		health_status VARCHAR(20) NOT NULL DEFAULT 'unknown',
 		health_reason_code VARCHAR(100),
@@ -371,6 +372,7 @@ func (db *DB) InitTables() error {
 		"ALTER TABLE token_usage_records ALTER COLUMN used_at DROP NOT NULL;",
 		"ALTER TABLE token_usage_records ALTER COLUMN used_at DROP DEFAULT;",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS health_status VARCHAR(20) NOT NULL DEFAULT 'unknown';",
+		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS login_source VARCHAR(100) NOT NULL DEFAULT 'official';",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS health_reason_code VARCHAR(100);",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS health_message TEXT;",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS cpu_usage DOUBLE PRECISION DEFAULT 0;",
@@ -506,7 +508,6 @@ func (db *DB) InitTables() error {
 	if _, err := db.Exec(oauth2ClientsTableSQL); err != nil {
 		return fmt.Errorf("failed to create oauth2_clients table: %w", err)
 	}
-
 
 	// 创建 OAuth2 客户端更新时间触发器
 	oauth2ClientsTriggerSQL := `

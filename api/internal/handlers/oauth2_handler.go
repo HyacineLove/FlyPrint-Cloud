@@ -14,22 +14,29 @@ import (
 	"fly-print-cloud/api/internal/auth"
 	"fly-print-cloud/api/internal/config"
 	"fly-print-cloud/api/internal/database"
+	"fly-print-cloud/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
 )
 
 // OAuth2Handler OAuth2 认证处理器
 type OAuth2Handler struct {
-	mode                    string // "builtin" | "keycloak"
-	builtinAuth             *auth.BuiltinAuthService
+	mode        string // "builtin" | "keycloak"
+	builtinAuth *auth.BuiltinAuthService
 
 	// Keycloak 模式字段
-	config                  *oauth2.Config
-	userInfoURL             string
-	adminConsoleURL         string
-	logoutURL               string
-	logoutRedirectURIParam  string
-	userRepo                *database.UserRepository
+	config                 *oauth2.Config
+	userInfoURL            string
+	adminConsoleURL        string
+	logoutURL              string
+	logoutRedirectURIParam string
+	userRepo               *database.UserRepository
+}
+
+type officialRegistrationRequest struct {
+	Username string `json:"username" binding:"required"`
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 // NewOAuth2Handler 创建 OAuth2 处理器
@@ -119,6 +126,54 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+// Register creates only a builtin viewer account. External identity
+// provisioning remains owned by the existing OAuth2 synchronization flow.
+func (h *OAuth2Handler) Register(c *gin.Context) {
+	if h.mode != "builtin" || h.builtinAuth == nil || h.userRepo == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "official_registration_unavailable"})
+		return
+	}
+
+	var req officialRegistrationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_registration"})
+		return
+	}
+	if exists, err := h.userRepo.UsernameExists(req.Username); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_check_failed"})
+		return
+	} else if exists {
+		c.JSON(http.StatusConflict, gin.H{"error": "username_exists"})
+		return
+	}
+	if exists, err := h.userRepo.EmailExists(req.Email); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_check_failed"})
+		return
+	} else if exists {
+		c.JSON(http.StatusConflict, gin.H{"error": "email_exists"})
+		return
+	}
+
+	user := &models.User{
+		Username:     req.Username,
+		Email:        req.Email,
+		PasswordHash: req.Password,
+		Role:         officialRegistrationRole(),
+		Status:       "active",
+	}
+	if err := h.userRepo.CreateUser(user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_registration", "message": err.Error()})
+		return
+	}
+
+	resp, err := h.builtinAuth.HandleTokenRequest("password", "", "", req.Username, req.Password, "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_login_failed"})
+		return
+	}
+	c.JSON(http.StatusCreated, resp)
 }
 
 // UserInfo 处理 GET /auth/userinfo
@@ -228,11 +283,11 @@ func (h *OAuth2Handler) Callback(c *gin.Context) {
 
 // OAuth2UserInfo OAuth2 用户信息结构
 type OAuth2UserInfo struct {
-	Sub              string `json:"sub"`
+	Sub               string `json:"sub"`
 	PreferredUsername string `json:"preferred_username"`
-	Email            string `json:"email"`
-	Name             string `json:"name"`
-	RealmAccess      struct {
+	Email             string `json:"email"`
+	Name              string `json:"name"`
+	RealmAccess       struct {
 		Roles []string `json:"roles"`
 	} `json:"realm_access"`
 }

@@ -447,6 +447,32 @@ func TestFileHandlerStorageDownloadStreamsFromStorage(t *testing.T) {
 	}
 }
 
+func TestFileHandlerStorageDownloadRejectsNonOwner(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	repo := &fakeFileRepository{fileByID: map[string]*models.File{
+		"file-1": {ID: "file-1", OriginalName: "report.pdf", FilePath: "objects/report.pdf", MimeType: "application/pdf", UploaderID: "owner-1"},
+	}}
+	handler, store := newStorageFileHandler(t, repo)
+	router := gin.New()
+	router.GET("/files/:id", func(c *gin.Context) {
+		c.Set("external_id", "other-user")
+		c.Set("roles", []string{"file:read"})
+		handler.Download(c)
+	})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/files/file-1", nil))
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("Download() status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+	if store.getCalls != 0 {
+		t.Fatalf("storage.Get() calls = %d, want 0", store.getCalls)
+	}
+}
+
 type fakeFileRepository struct {
 	created   *models.File
 	createErr error

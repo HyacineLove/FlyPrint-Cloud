@@ -221,7 +221,7 @@ func main() {
 
 	// 初始化处理器
 	userHandler := handlers.NewUserHandler(userRepo)
-	edgeNodeHandler := handlers.NewEdgeNodeHandler(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, integrationRequestRepo, opsContactRepo)
+	edgeNodeHandler := handlers.NewEdgeNodeHandler(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, integrationRequestRepo, opsContactRepo, integrationProviderRepo)
 	printerHandler := handlers.NewPrinterHandler(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo)
 	printJobHandler := handlers.NewPrintJobHandler(printJobRepo, printerRepo, edgeNodeRepo, wsManager, statusService, alertRepo)
 	oauth2Handler := handlers.NewOAuth2Handler(&cfg.OAuth2, &cfg.Admin, userRepo, builtinAuth)
@@ -308,8 +308,9 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 	// OAuth2 认证路由
 	authGroup := r.Group("/auth")
 	{
-		authGroup.GET("/mode", oauth2Handler.Mode)         // 返回当前认证模式（公开）
-		authGroup.POST("/token", oauth2Handler.Token)      // Token 端点（builtin 模式）
+		authGroup.GET("/mode", oauth2Handler.Mode)    // 返回当前认证模式（公开）
+		authGroup.POST("/token", oauth2Handler.Token) // Token 端点（builtin 模式）
+		authGroup.POST("/register", oauth2Handler.Register)
 		authGroup.GET("/userinfo", oauth2Handler.UserInfo) // UserInfo 端点
 		authGroup.GET("/login", oauth2Handler.Login)
 		authGroup.GET("/callback", oauth2Handler.Callback)
@@ -385,6 +386,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 				edgeNodeGroup.GET("/:id", edgeNodeHandler.GetEdgeNode)
 				edgeNodeGroup.PATCH("/:id/alias", edgeNodeHandler.UpdateAlias)
 				edgeNodeGroup.PATCH("/:id/enabled", edgeNodeHandler.UpdateEnabled)
+				edgeNodeGroup.PATCH("/:id/login-source", middleware.OAuth2ResourceServer("fly-print-admin"), edgeNodeHandler.UpdateLoginSource)
 				edgeNodeGroup.DELETE("/:id", edgeNodeHandler.DeleteEdgeNode)
 			}
 

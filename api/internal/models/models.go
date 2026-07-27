@@ -7,6 +7,7 @@ import (
 // EdgeNode Edge节点
 type EdgeNode struct {
 	ID                      string     `json:"id"`
+	LoginSource             string     `json:"login_source"`
 	Name                    string     `json:"name"`            // Edge 上报的原始名称
 	Alias                   string     `json:"alias,omitempty"` // Cloud 运维别名
 	RegistrationState       string     `json:"registration_state"`

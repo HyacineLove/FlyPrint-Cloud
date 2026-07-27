@@ -20,6 +20,13 @@ func (r *TerminalUploadSessionRepository) DeleteForNodeTx(tx *Tx, nodeID string)
 	return err
 }
 
+// DeleteForNode revokes all ephemeral upload credentials when an Edge session
+// is replaced or the node is disabled.
+func (r *TerminalUploadSessionRepository) DeleteForNode(nodeID string) error {
+	_, err := r.db.Exec(`DELETE FROM terminal_upload_sessions WHERE node_id=$1`, nodeID)
+	return err
+}
+
 func (r *TerminalUploadSessionRepository) Create(rawToken, ticketHash, nodeID, printerID, sessionID string, expiresAt time.Time) error {
 	_, err := r.db.Exec(`INSERT INTO terminal_upload_sessions(upload_token_hash,terminal_ticket_hash,node_id,printer_id,terminal_session_id,expires_at)
 		VALUES($1,$2,$3,$4,$5,$6)`, uploadTokenHash(rawToken), ticketHash, nodeID, printerID, sessionID, expiresAt)
@@ -48,6 +55,21 @@ func (r *TerminalUploadSessionRepository) GetByToken(rawToken string, now time.T
 	info := &TerminalUploadSessionInfo{}
 	err := r.db.QueryRow(`SELECT terminal_ticket_hash,node_id,printer_id,terminal_session_id,file_id,expires_at
 		FROM terminal_upload_sessions WHERE upload_token_hash=$1 AND expires_at>$2`, uploadTokenHash(rawToken), now).Scan(
+		&info.TicketHash, &info.NodeID, &info.PrinterID, &info.SessionID, &info.FileID, &info.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return info, nil
+}
+
+// GetByFileID returns the terminal binding created by an official upload.
+func (r *TerminalUploadSessionRepository) GetByFileID(fileID string) (*TerminalUploadSessionInfo, error) {
+	info := &TerminalUploadSessionInfo{}
+	err := r.db.QueryRow(`SELECT terminal_ticket_hash,node_id,printer_id,terminal_session_id,file_id,expires_at
+		FROM terminal_upload_sessions WHERE file_id=$1::uuid ORDER BY expires_at DESC LIMIT 1`, fileID).Scan(
 		&info.TicketHash, &info.NodeID, &info.PrinterID, &info.SessionID, &info.FileID, &info.ExpiresAt)
 	if err == sql.ErrNoRows {
 		return nil, nil

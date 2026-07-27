@@ -36,6 +36,10 @@ func NewTerminalTicketHandler(tickets *database.TerminalTicketRepository, printe
 }
 
 func (h *TerminalTicketHandler) EntryPage(c *gin.Context) {
+	if c.Query("terminal_ticket") != "" {
+		h.directEntryPage(c)
+		return
+	}
 	raw := c.Query("terminal_ticket")
 	if raw == "" {
 		if c.Query("token") != "" {
@@ -63,6 +67,84 @@ func (h *TerminalTicketHandler) EntryPage(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte("<!doctype html><html lang=zh-CN><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>飞印打印入口</title><style>*{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#172033;font-family:system-ui,-apple-system,'Microsoft YaHei',sans-serif}main{max-width:560px;margin:0 auto;padding:48px 20px}h1{font-size:28px;margin:0 0 8px}p{color:#697386;margin:0 0 28px}.entries{display:grid;gap:14px}button{width:100%;padding:20px;text-align:left;border:1px solid #dce3ee;border-radius:14px;background:#fff;box-shadow:0 6px 20px rgba(37,61,95,.07);cursor:pointer}button:active{transform:translateY(1px)}button:disabled{cursor:wait;opacity:.65}strong,span{display:block}strong{font-size:18px;color:#1268e8;margin-bottom:5px}span{font-size:14px;color:#778195}.notice{display:none;margin-top:18px;padding:14px 16px;border-radius:12px;background:#fff2f0;color:#b42318;border:1px solid #ffccc7;line-height:1.55}.notice.visible{display:block}</style></head><body><main><h1>选择打印入口</h1><p>未上传完成前可重新选择入口；上传或提交后不可更换。</p><div class=entries>"+buttons+"</div><div id=notice class=notice role=alert></div><script>const notice=document.getElementById('notice');window.addEventListener('pageshow',()=>document.querySelectorAll('button').forEach(x=>x.disabled=false));const errors={terminal_ticket_locked_or_expired:'本次二维码已失效或已完成上传，请返回终端重新扫码。',terminal_session_invalid:'终端会话已更新，请返回终端重新扫码。',terminal_entry_unavailable:'所选打印入口当前不可用，请联系管理员。',node_disabled:'打印终端已停用，请联系工作人员。',printer_unavailable:'打印机不可用或已删除，请联系工作人员。',official_upload_unavailable:'官方打印暂时不可用，请稍后重新扫码。'};document.querySelectorAll('[data-entry]').forEach(b=>b.onclick=async()=>{document.querySelectorAll('button').forEach(x=>x.disabled=true);notice.classList.remove('visible');try{const r=await fetch('/api/v1/public/terminal-entry/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({terminal_ticket:'"+ticket+"',entry:b.dataset.entry})});const d=await r.json();if(r.ok&&d.redirect_url){document.querySelectorAll('button').forEach(x=>x.disabled=false);location.href=d.redirect_url;return}notice.textContent=errors[d.error]||'打印入口暂时不可用，请返回终端重新扫码。'}catch(e){notice.textContent='网络连接异常，请检查网络后重新尝试。'}notice.classList.add('visible');document.querySelectorAll('button').forEach(x=>x.disabled=false)});</script></main></body></html>"))
+}
+
+// directEntryPage routes a QR ticket using the login source configured on its
+// Edge node. The public page intentionally has no provider selection step.
+func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
+	raw := c.Query("terminal_ticket")
+	ticket, err := h.tickets.GetValidByHash(ticketHash(raw), time.Now())
+	if err != nil {
+		renderEntryError(c, http.StatusGone, "terminal ticket expired", "Please return to the terminal and scan a new QR code.", false)
+		return
+	}
+
+	if h.sessions != nil {
+		matched, matchErr := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash, "")
+		if matchErr != nil || !matched {
+			renderEntryError(c, http.StatusConflict, "terminal session expired", "The terminal session has changed. Please scan a new QR code.", false)
+			return
+		}
+	}
+
+	node, err := h.edgeNodes.GetEdgeNodeByID(ticket.NodeID)
+	if err != nil || node == nil || !node.Enabled {
+		renderEntryError(c, http.StatusForbidden, "terminal unavailable", "This terminal is disabled or offline.", false)
+		return
+	}
+	source := node.LoginSource
+	if source == "" {
+		source = "official"
+	}
+	if !isValidTerminalLoginSource(source) {
+		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal login source is not configured correctly.", false)
+		return
+	}
+
+	var provider *models.IntegrationProvider
+	if source != "official" {
+		provider, err = h.providers.Get(source, false)
+		if err != nil || provider == nil || !provider.Enabled {
+			renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The configured provider is unavailable.", false)
+			return
+		}
+	}
+
+	printer, err := h.printers.GetPrinterByID(ticket.PrinterID)
+	if err != nil || printer == nil || printer.EdgeNodeID != ticket.NodeID || !printer.Enabled {
+		renderEntryError(c, http.StatusForbidden, "printer unavailable", "The configured printer is unavailable.", false)
+		return
+	}
+
+	selected, err := h.tickets.Select(ticket.TicketHash, source, time.Now())
+	if err != nil {
+		renderEntryError(c, http.StatusConflict, "terminal ticket expired", "The ticket is expired or has already been used.", false)
+		return
+	}
+	_ = h.uploadSessions.DeleteOpenForTicket(selected.TicketHash)
+
+	if source == "official" {
+		token, expiresAt, tokenErr := h.tokens.GenerateUploadToken(selected.NodeID, selected.PrinterID)
+		if tokenErr != nil || h.uploadSessions.Create(token, selected.TicketHash, selected.NodeID, selected.PrinterID, selected.TerminalSessionID, expiresAt) != nil {
+			renderEntryError(c, http.StatusServiceUnavailable, "official upload unavailable", "Official upload is temporarily unavailable.", true)
+			return
+		}
+		query := url.Values{"token": {token}, "node_id": {selected.NodeID}, "printer_id": {selected.PrinterID}}
+		c.Header("Cache-Control", "no-store")
+		c.Redirect(http.StatusFound, "/upload?"+query.Encode())
+		return
+	}
+
+	redirect, err := url.Parse(provider.EntryURL)
+	if err != nil {
+		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The configured provider entry is invalid.", false)
+		return
+	}
+	query := redirect.Query()
+	query.Set("terminal_ticket", raw)
+	redirect.RawQuery = query.Encode()
+	c.Header("Cache-Control", "no-store")
+	c.Redirect(http.StatusFound, redirect.String())
 }
 
 // redirectUploadTokenToEntry bridges the original Edge QR path into the entry

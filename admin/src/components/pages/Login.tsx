@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, Card, message, Typography, Spin } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { Link, useSearchParams } from 'react-router-dom';
 import { buildAuthUrl, buildAppPath } from '../../config';
+import { apiService } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
 
 const { Title, Text } = Typography;
@@ -20,6 +22,7 @@ interface LoginForm {
 }
 
 const Login: React.FC = () => {
+	const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [checkingMode, setCheckingMode] = useState(true);
 
@@ -56,6 +59,7 @@ const Login: React.FC = () => {
       const result = await response.json();
 
       if (response.ok && result.access_token) {
+		apiService.setToken(result.access_token);
         // Token is set via Set-Cookie header by backend, or we store it
         // For builtin mode, we need to set the cookie manually
         const expiresDate = new Date(Date.now() + (result.expires_in || 3600) * 1000);
@@ -63,7 +67,8 @@ const Login: React.FC = () => {
         
         message.success('登录成功');
         // Redirect to dashboard（子路径部署时带 basename）
-        window.location.href = buildAppPath('/');
+        const returnTo = searchParams.get('return_to');
+        window.location.href = returnTo && returnTo.startsWith('/') ? returnTo : buildAppPath('/');
       } else {
         message.error(mapApiError(result, '登录失败'));
       }
@@ -135,6 +140,10 @@ const Login: React.FC = () => {
               登录
             </Button>
           </Form.Item>
+
+			<div style={{ textAlign: 'center' }}>
+				<Link to={`/register${searchParams.get('return_to') ? `?return_to=${encodeURIComponent(searchParams.get('return_to') || '')}` : ''}`}>注册官方账号</Link>
+			</div>
         </Form>
       </Card>
     </div>

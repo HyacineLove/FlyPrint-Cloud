@@ -134,7 +134,16 @@ func (h *FileHandler) Upload(c *gin.Context) {
 			return
 		}
 		nodeID = payload.NodeID
-		uploaderID = payload.NodeID // 使用节点ID作为上传者标识
+		if userID, authenticated := authenticatedUserID(c); authenticated {
+			uploaderID = userID
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"error":   "official_user_auth_required",
+				"message": "Official account authentication is required",
+			})
+			return
+		}
 		logger.Debug("File upload pre-authorized for node", zap.String("node_id", payload.NodeID), zap.String("printer_id", payload.PrinterID))
 	} else {
 		// 使用 OAuth2 验证（可选认证模式下由中间件处理）
@@ -567,6 +576,15 @@ func (h *FileHandler) PreflightUpload(c *gin.Context) {
 			})
 			return
 		}
+		if _, authenticated := authenticatedUserID(c); !authenticated {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    401,
+				"error":   "official_user_auth_required",
+				"message": "Official account authentication is required",
+				"valid":   false,
+			})
+			return
+		}
 	} else {
 		if _, exists := c.Get("external_id"); !exists {
 			if _, exists := c.Get("sub"); !exists {
@@ -657,16 +675,18 @@ func (h *FileHandler) ensureUploadTargetActive(nodeID, printerID string) error {
 }
 
 func (h *FileHandler) ensureTerminalUploadSessionActive(rawToken string) error {
-	if h.terminalUploadSessions == nil || h.terminalSessions == nil || rawToken == "" {
+	if rawToken == "" {
 		return nil
+	}
+	if h.terminalUploadSessions == nil || h.terminalSessions == nil {
+		return errTerminalSessionInvalid
 	}
 	info, err := h.terminalUploadSessions.GetByToken(rawToken, time.Now())
 	if err != nil {
 		return err
 	}
 	if info == nil {
-		// Legacy uploads without an entry-bridge mapping remain allowed.
-		return nil
+		return errTerminalSessionInvalid
 	}
 	ok, err := h.terminalSessions.Matches(info.NodeID, info.SessionID, info.TicketHash, "")
 	if err != nil {
@@ -679,6 +699,20 @@ func (h *FileHandler) ensureTerminalUploadSessionActive(rawToken string) error {
 }
 
 var errTerminalSessionInvalid = errors.New("terminal session invalid")
+
+func authenticatedUserID(c *gin.Context) (string, bool) {
+	for _, key := range []string{"external_id", "sub"} {
+		value, exists := c.Get(key)
+		if !exists {
+			continue
+		}
+		userID, ok := value.(string)
+		if ok && userID != "" {
+			return userID, true
+		}
+	}
+	return "", false
+}
 
 func uploadTargetErrorCode(err error) string {
 	switch err {
