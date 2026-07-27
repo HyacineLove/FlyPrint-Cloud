@@ -29,7 +29,7 @@ def get_base_url() -> str:
 
 def get_admin_credentials() -> Dict[str, str]:
     return {
-        "username": os.environ.get("FLYPRINT_ADMIN_USERNAME", "admin"),
+        "username": os.environ.get("FLYPRINT_ADMIN_EMAIL", "admin@flyprint.local"),
         "password": os.environ.get("FLYPRINT_ADMIN_PASSWORD", "admin123"),
     }
 

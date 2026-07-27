@@ -9,7 +9,8 @@ import {
   LogoutOutlined,
   ControlOutlined,
   ApiOutlined,
-  TeamOutlined
+  TeamOutlined,
+  UserOutlined
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 
@@ -24,6 +25,7 @@ import Register from './components/pages/Register';
 import BusinessSettings from './components/pages/BusinessSettings';
 import IntegrationProviders from './components/pages/IntegrationProviders';
 import OpsContacts from './components/pages/OpsContacts';
+import Users from './components/pages/Users';
 
 // 导入错误边界和工具
 import ErrorBoundary from './components/ErrorBoundary';
@@ -114,6 +116,11 @@ const AdminApp: React.FC = () => {
       key: '/ops-contacts',
       icon: <TeamOutlined />,
       label: '运维人员',
+    },
+    {
+      key: '/users',
+      icon: <UserOutlined />,
+      label: '用户管理',
     },
     {
       key: '/printers',
@@ -231,6 +238,7 @@ const AdminApp: React.FC = () => {
               <Route path="/" element={<Dashboard />} />
               <Route path="/edge-nodes" element={<EdgeNodes />} />
               <Route path="/ops-contacts" element={<OpsContacts />} />
+              <Route path="/users" element={<Users />} />
               <Route path="/printers" element={<Printers />} />
               <Route path="/print-jobs" element={<PrintJobs />} />
               <Route path="/business-settings" element={<BusinessSettings />} />

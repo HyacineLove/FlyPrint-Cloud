@@ -348,6 +348,17 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 			// 当前用户业务信息 - 任何认证用户都可以访问自己的档案
 			adminGroup.GET("/profile", middleware.OAuth2ResourceServer(), userHandler.GetCurrentUserProfile)
 
+			// 用户管理只允许 admin scope；viewer/operator 不能读取或修改账号资料。
+			userManagementGroup := adminGroup.Group("/users", middleware.OAuth2ResourceServer("fly-print-admin"))
+			{
+				userManagementGroup.GET("", userHandler.ListUsers)
+				userManagementGroup.POST("", userHandler.CreateUser)
+				userManagementGroup.GET("/:id", userHandler.GetUser)
+				userManagementGroup.PUT("/:id", userHandler.UpdateUser)
+				userManagementGroup.DELETE("/:id", userHandler.DeleteUser)
+				userManagementGroup.PUT("/:id/password", userHandler.ChangePassword)
+			}
+
 			businessSettingsGroup := adminGroup.Group("/business-settings", middleware.OAuth2ResourceServer("fly-print-admin"))
 			{
 				businessSettingsGroup.GET("", businessSettingsHandler.Get)

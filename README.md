@@ -72,7 +72,7 @@ docker compose up --build -d
 
 | 项 | 默认值 |
 |----|--------|
-| 用户名 | `admin` |
+| 登录邮箱 | `admin@flyprint.local` |
 | 密码 | `admin123` |
 
 健康检查：`GET /health`、`GET /api/v1/health`。
@@ -173,6 +173,8 @@ PostgreSQL 和 MinIO 数据均应纳入备份。只有备份文件而不备份�
 ### 认证
 
 Edge 使用 OAuth2 `client_credentials` 获取访问令牌。实际 scope 由 Cloud 客户端配置和接口校验共同决定，至少涉及节点注册、心跳、打印机和文件读取能力。
+
+内置账号使用邮箱作为唯一登录标识。官方注册只需要邮箱和密码，注册用户固定为 `viewer`；管理端的用户管理可按邮箱创建、编辑、停用账号和修改密码。旧 `users.username` 字段仅为数据库兼容保留，不再作为内置账号登录名。官方上传页提供“退出账号”，退出后会回到登录页并保留当前扫码地址。
 
 ### REST 摘要
 

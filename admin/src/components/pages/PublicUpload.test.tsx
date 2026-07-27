@@ -8,6 +8,8 @@ import { apiService } from '../../services/api';
 
 jest.mock('../../services/api', () => ({
   apiService: {
+    getToken: jest.fn().mockResolvedValue('test-user-token'),
+    clearToken: jest.fn(),
     uploadFile: jest.fn(),
   },
 }));

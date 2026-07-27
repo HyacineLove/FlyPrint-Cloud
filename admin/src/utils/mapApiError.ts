@@ -15,6 +15,7 @@ const CODE_MESSAGES: Record<string, string> = {
 };
 
 const PHRASE_MESSAGES: Array<[RegExp | string, string]> = [
+  ['invalid email or password', '邮箱或密码错误'],
   ['invalid username or password', '用户名或密码错误'],
   ['invalid_grant', '用户名或密码错误'],
   ['invalid_client', '客户端认证失败'],

@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Result, Spin, Typography, message } from 'antd';
-import { CheckCircleOutlined, FileOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, FileOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { apiService } from '../../services/api';
 import { UploadPolicy, uploadService } from '../../services/upload';
-import { buildAppPath } from '../../config';
+import { buildAppPath, buildAuthUrl } from '../../config';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -356,6 +356,17 @@ const PublicUpload: React.FC = () => {
     event.target.value = '';
   };
 
+  const handleLogout = async () => {
+    apiService.clearToken();
+    try {
+      await fetch(buildAuthUrl('logout'), { method: 'POST' });
+    } finally {
+      document.cookie = 'access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      const returnTo = `${window.location.pathname}${window.location.search}`;
+      window.location.assign(`${buildAppPath('/login')}?return_to=${encodeURIComponent(returnTo)}`);
+    }
+  };
+
   if (pageState === 'verifying') {
     return <Spin fullscreen size="large" tip="正在验证上传二维码..." />;
   }
@@ -377,6 +388,7 @@ const PublicUpload: React.FC = () => {
           description={pageErrorMessage}
           type="error"
           showIcon
+          action={<Button icon={<LogoutOutlined />} onClick={() => void handleLogout()}>退出账号</Button>}
           style={{ maxWidth: 520, padding: 24 }}
         />
       </div>
@@ -400,6 +412,7 @@ const PublicUpload: React.FC = () => {
           title="上传成功"
           subTitle="文件已提交到飞印平台，请在终端屏幕上继续确认打印。"
           icon={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
+          extra={<Button icon={<LogoutOutlined />} onClick={() => void handleLogout()}>退出账号</Button>}
           style={{ maxWidth: 520 }}
         />
       </div>
@@ -421,6 +434,11 @@ const PublicUpload: React.FC = () => {
     >
       <div style={{ maxWidth: 640, width: '100%' }}>
         <Card style={{ textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <Button type="link" danger icon={<LogoutOutlined />} onClick={() => void handleLogout()}>
+              退出账号
+            </Button>
+          </div>
           <Title level={2}>文件上传</Title>
           <Paragraph type="secondary" style={{ marginBottom: 12 }}>
             二维码当前可用，请尽快完成上传。

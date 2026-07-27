@@ -4,6 +4,7 @@ import (
 	"fly-print-cloud/api/internal/database"
 	"fly-print-cloud/api/internal/logger"
 	"fly-print-cloud/api/internal/models"
+	"fly-print-cloud/api/internal/security"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,7 +25,6 @@ func NewUserHandler(userRepo *database.UserRepository) *UserHandler {
 
 // CreateUserRequest 创建用户请求
 type CreateUserRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=50"`
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
 	Role     string `json:"role" binding:"required,oneof=admin operator viewer"`
@@ -32,7 +32,6 @@ type CreateUserRequest struct {
 
 // UpdateUserRequest 更新用户请求
 type UpdateUserRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=50"`
 	Email    string `json:"email" binding:"required,email"`
 	Role     string `json:"role" binding:"required,oneof=admin operator viewer"`
 	Status   string `json:"status" binding:"required,oneof=active inactive"`
@@ -97,20 +96,9 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	// 检查用户名是否已存在
-	exists, err := h.userRepo.UsernameExists(req.Username)
-	if err != nil {
-		logger.Error("Failed to check username existence", zap.Error(err))
-		InternalErrorResponse(c, "检查用户名失败")
-		return
-	}
-	if exists {
-		BadRequestResponse(c, "用户名已存在")
-		return
-	}
-
 	// 检查邮箱是否已存在
-	exists, err = h.userRepo.EmailExists(req.Email)
+	req.Email = security.NormalizeEmail(req.Email)
+	exists, err := h.userRepo.EmailExists(req.Email)
 	if err != nil {
 		logger.Error("Failed to check email existence", zap.Error(err))
 		InternalErrorResponse(c, "检查邮箱失败")
@@ -124,7 +112,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	// 创建用户
 	user := &models.User{
 		ID:           uuid.New().String(),
-		Username:     req.Username,
+		Username:     security.InternalUsernameForEmail(req.Email),
 		Email:        req.Email,
 		PasswordHash: req.Password, // 在repository中会被加密
 		Role:         req.Role,
@@ -137,7 +125,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	logger.Info("User created successfully by admin", zap.String("username", user.Username))
+	logger.Info("User created successfully by admin", zap.String("email", user.Email))
 	// 直接返回用户信息（敏感字段已过滤）
 	CreatedResponse(c, user)
 }
@@ -181,20 +169,9 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
-	// 检查用户名是否已被其他用户使用
-	exists, err := h.userRepo.UsernameExists(req.Username, userID)
-	if err != nil {
-		logger.Error("Failed to check username existence", zap.Error(err))
-		InternalErrorResponse(c, "检查用户名失败")
-		return
-	}
-	if exists {
-		BadRequestResponse(c, "用户名已被其他用户使用")
-		return
-	}
-
 	// 检查邮箱是否已被其他用户使用
-	exists, err = h.userRepo.EmailExists(req.Email, userID)
+	req.Email = security.NormalizeEmail(req.Email)
+	exists, err := h.userRepo.EmailExists(req.Email, userID)
 	if err != nil {
 		logger.Error("Failed to check email existence", zap.Error(err))
 		InternalErrorResponse(c, "检查邮箱失败")
@@ -206,7 +183,6 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	}
 
 	// 更新用户信息
-	user.Username = req.Username
 	user.Email = req.Email
 	user.Role = req.Role
 	user.Status = req.Status
@@ -224,7 +200,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		Role:     user.Role,
 	}
 
-	logger.Info("User updated successfully", zap.String("username", user.Username))
+	logger.Info("User updated successfully", zap.String("email", user.Email))
 	SuccessResponse(c, userInfo)
 }
 
@@ -278,6 +254,10 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequestResponse(c, "请求参数无效")
+		return
+	}
+	if err := security.ValidatePasswordStrength(req.NewPassword); err != nil {
+		BadRequestResponse(c, "密码强度不足")
 		return
 	}
 

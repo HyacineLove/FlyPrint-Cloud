@@ -60,12 +60,12 @@ func NewBuiltinAuthService(
 }
 
 // HandleTokenRequest 处理 /auth/token 请求
-func (s *BuiltinAuthService) HandleTokenRequest(grantType, clientID, clientSecret, username, password, scope string) (*TokenResponse, error) {
+func (s *BuiltinAuthService) HandleTokenRequest(grantType, clientID, clientSecret, email, password, scope string) (*TokenResponse, error) {
 	switch grantType {
 	case "client_credentials":
 		return s.handleClientCredentials(clientID, clientSecret, scope)
 	case "password":
-		return s.handlePasswordGrant(username, password, scope)
+		return s.handlePasswordGrant(email, password, scope)
 	default:
 		return nil, fmt.Errorf("unsupported grant_type: %s", grantType)
 	}
@@ -128,17 +128,17 @@ func (s *BuiltinAuthService) handleClientCredentials(clientID, clientSecret, req
 	}, nil
 }
 
-// handlePasswordGrant 处理 Password Grant Flow（管理员登录）
-func (s *BuiltinAuthService) handlePasswordGrant(username, password, requestedScope string) (*TokenResponse, error) {
+// handlePasswordGrant 处理 Password Grant Flow（邮箱登录）
+func (s *BuiltinAuthService) handlePasswordGrant(email, password, requestedScope string) (*TokenResponse, error) {
 	// 查询用户
-	user, err := s.userRepo.GetUserByUsername(username)
+	user, err := s.userRepo.GetUserByEmail(email)
 	if err != nil {
-		return nil, fmt.Errorf("invalid_grant: invalid username or password")
+		return nil, fmt.Errorf("invalid_grant: invalid email or password")
 	}
 
 	// 验证密码
 	if !s.userRepo.VerifyPassword(user, password) {
-		return nil, fmt.Errorf("invalid_grant: invalid username or password")
+		return nil, fmt.Errorf("invalid_grant: invalid email or password")
 	}
 
 	// 根据用户角色映射 scope

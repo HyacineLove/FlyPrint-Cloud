@@ -33,6 +33,10 @@ class ApiService {
     this.token = token;
   }
 
+  clearToken() {
+    this.token = null;
+  }
+
   // 获取认证 token
   async getToken(): Promise<string | null> {
     if (this.token) {

@@ -451,6 +451,7 @@ func (db *DB) InitTables() error {
 		"CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);",
 		"CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);", // username已有UNIQUE，此索引可选
 		"CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);",       // email已有UNIQUE，此索引可选
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email));",
 	}
 
 	// 创建文件表

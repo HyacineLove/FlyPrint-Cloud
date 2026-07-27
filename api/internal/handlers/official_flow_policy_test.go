@@ -53,25 +53,23 @@ func TestOfficialRegistrationCreatesViewerAndReturnsToken(t *testing.T) {
 	builtin := auth.NewBuiltinAuthService(nil, userRepo, &config.OAuth2Config{JWTSigningSecret: "test-signing-secret", JWTTokenExpiry: 3600, JWTIssuer: "test-issuer"})
 	handler := &OAuth2Handler{mode: "builtin", builtinAuth: builtin, userRepo: userRepo}
 
-	usernameExists := mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE username = $1 AND status = 'active'"))
-	usernameExists.WithArgs("alice").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	emailExists := mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE email = $1 AND status = 'active'"))
+	emailExists := mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND status = 'active'"))
 	emailExists.WithArgs("alice@example.com").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	createUser := mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO users (username, email, password_hash, role, status)"))
-	createUser.WithArgs("alice", "alice@example.com", sqlmock.AnyArg(), "viewer", "active").WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow("user-1", time.Now(), time.Now()))
+	createUser.WithArgs(sqlmock.AnyArg(), "alice@example.com", sqlmock.AnyArg(), "viewer", "active").WillReturnRows(sqlmock.NewRows([]string{"id", "created_at", "updated_at"}).AddRow("user-1", time.Now(), time.Now()))
 
 	hash, err := bcrypt.GenerateFromPassword([]byte("StrongPass1"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("bcrypt.GenerateFromPassword() error = %v", err)
 	}
 	getUser := mock.ExpectQuery(regexp.QuoteMeta("SELECT id, username, email, password_hash, role, status, last_login, created_at, updated_at"))
-	getUser.WithArgs("alice").WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "last_login", "created_at", "updated_at"}).AddRow("user-1", "alice", "alice@example.com", string(hash), "viewer", "active", nil, time.Now(), time.Now()))
+	getUser.WithArgs("alice@example.com").WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "last_login", "created_at", "updated_at"}).AddRow("user-1", "internal-user", "alice@example.com", string(hash), "viewer", "active", nil, time.Now(), time.Now()))
 	lastLogin := mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1"))
 	lastLogin.WithArgs("user-1").WillReturnResult(sqlmock.NewResult(0, 1))
 
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"username":"alice","email":"alice@example.com","password":"StrongPass1"}`))
+	context.Request = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"email":"Alice@Example.com","password":"StrongPass1"}`))
 	context.Request.Header.Set("Content-Type", "application/json")
 	handler.Register(context)
 

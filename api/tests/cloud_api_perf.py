@@ -92,7 +92,7 @@ def main() -> int:
             "auth": False,
             "data": {
                 "grant_type": "password",
-                "username": "admin",
+                "username": "admin@flyprint.local",
                 "password": "admin123",
                 "scope": "fly-print-admin fly-print-operator edge:register edge:printer print:submit",
             },

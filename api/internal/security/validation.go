@@ -1,8 +1,11 @@
 package security
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 	"unicode"
 )
 
@@ -139,6 +142,21 @@ func ValidateEmail(email string) error {
 	}
 
 	return nil
+}
+
+// NormalizeEmail returns the canonical form used by builtin account lookup.
+// Email is the login identifier, so comparisons must not depend on casing or
+// accidental surrounding whitespace.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// InternalUsernameForEmail keeps the legacy users.username column populated
+// without making it a second login identifier. Official and admin-created
+// accounts authenticate by email only.
+func InternalUsernameForEmail(email string) string {
+	digest := sha256.Sum256([]byte(NormalizeEmail(email)))
+	return "u_" + hex.EncodeToString(digest[:])[:48]
 }
 
 // ValidateUsername 验证用户名

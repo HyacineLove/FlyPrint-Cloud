@@ -11,7 +11,7 @@ const Register: React.FC = () => {
   const [searchParams] = useSearchParams();
   const returnTo = searchParams.get('return_to');
 
-  const onFinish = async (values: { username: string; email: string; password: string }) => {
+  const onFinish = async (values: { email: string; password: string }) => {
     setLoading(true);
     try {
       const response = await fetch(buildAuthUrl('register'), {
@@ -41,12 +41,19 @@ const Register: React.FC = () => {
         <Title level={3}>注册官方账号</Title>
         <Text type="secondary">注册后可在扫码终端上传并确认打印</Text>
         <Form layout="vertical" size="large" onFinish={onFinish} style={{ marginTop: 24 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true, min: 3, max: 50 }]}><Input /></Form.Item>
-          <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email' }]}><Input /></Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>
-          <Form.Item><Button type="primary" htmlType="submit" loading={loading} block>注册并登录</Button></Form.Item>
+          <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email', message: '请输入有效的邮箱' }]}>
+            <Input type="email" autoComplete="email" />
+          </Form.Item>
+          <Form.Item name="password" label="密码" rules={[{ required: true, min: 8, message: '密码至少需要 8 个字符' }]}>
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={loading} block>注册并登录</Button>
+          </Form.Item>
         </Form>
-        <div style={{ textAlign: 'center' }}><Link to={`/login${returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''}`}>已有账号，返回登录</Link></div>
+        <div style={{ textAlign: 'center' }}>
+          <Link to={`/login${returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''}`}>已有账号，返回登录</Link>
+        </div>
       </Card>
     </div>
   );

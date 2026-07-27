@@ -15,6 +15,7 @@ import (
 	"fly-print-cloud/api/internal/config"
 	"fly-print-cloud/api/internal/database"
 	"fly-print-cloud/api/internal/models"
+	"fly-print-cloud/api/internal/security"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
 )
@@ -34,8 +35,7 @@ type OAuth2Handler struct {
 }
 
 type officialRegistrationRequest struct {
-	Username string `json:"username" binding:"required"`
-	Email    string `json:"email" binding:"required"`
+	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -97,11 +97,13 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	grantType := c.Request.FormValue("grant_type")
 	clientID := c.Request.FormValue("client_id")
 	clientSecret := c.Request.FormValue("client_secret")
-	username := c.Request.FormValue("username")
+	// OAuth2 keeps the standard username form field; in builtin mode its value
+	// is the account email and is never treated as a separate username.
+	email := c.Request.FormValue("username")
 	password := c.Request.FormValue("password")
 	scope := c.Request.FormValue("scope")
 
-	resp, err := h.builtinAuth.HandleTokenRequest(grantType, clientID, clientSecret, username, password, scope)
+	resp, err := h.builtinAuth.HandleTokenRequest(grantType, clientID, clientSecret, email, password, scope)
 	if err != nil {
 		errMsg := err.Error()
 		// 根据错误类型返回不同的 HTTP 状态码
@@ -141,13 +143,7 @@ func (h *OAuth2Handler) Register(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_registration"})
 		return
 	}
-	if exists, err := h.userRepo.UsernameExists(req.Username); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_check_failed"})
-		return
-	} else if exists {
-		c.JSON(http.StatusConflict, gin.H{"error": "username_exists"})
-		return
-	}
+	req.Email = security.NormalizeEmail(req.Email)
 	if exists, err := h.userRepo.EmailExists(req.Email); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_check_failed"})
 		return
@@ -157,7 +153,7 @@ func (h *OAuth2Handler) Register(c *gin.Context) {
 	}
 
 	user := &models.User{
-		Username:     req.Username,
+		Username:     security.InternalUsernameForEmail(req.Email),
 		Email:        req.Email,
 		PasswordHash: req.Password,
 		Role:         officialRegistrationRole(),
@@ -168,7 +164,7 @@ func (h *OAuth2Handler) Register(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.builtinAuth.HandleTokenRequest("password", "", "", req.Username, req.Password, "")
+	resp, err := h.builtinAuth.HandleTokenRequest("password", "", "", req.Email, req.Password, "")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_login_failed"})
 		return

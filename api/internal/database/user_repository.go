@@ -23,6 +23,8 @@ func NewUserRepository(db *DB) *UserRepository {
 
 // CreateUser 创建用户
 func (r *UserRepository) CreateUser(user *models.User) error {
+	user.Email = security.NormalizeEmail(user.Email)
+
 	// 验证用户名格式
 	if err := security.ValidateUsername(user.Username); err != nil {
 		return fmt.Errorf("invalid username: %w", err)
@@ -89,6 +91,32 @@ func (r *UserRepository) GetUserByUsername(username string) (*models.User, error
 		FROM users WHERE username = $1 AND status = 'active'`
 
 	err := r.db.QueryRow(query, username).Scan(
+		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role,
+		&user.Status, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	if lastLogin.Valid {
+		user.LastLogin = lastLogin.Time
+	}
+
+	return user, nil
+}
+
+// GetUserByEmail gets an active builtin account by its canonical login
+// identifier. Email matching is case-insensitive for existing records too.
+func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
+	user := &models.User{}
+	var lastLogin sql.NullTime
+	query := `
+		SELECT id, username, email, password_hash, role, status, last_login, created_at, updated_at
+		FROM users WHERE LOWER(email) = LOWER($1) AND status = 'active'`
+
+	err := r.db.QueryRow(query, security.NormalizeEmail(email)).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role,
 		&user.Status, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
@@ -222,8 +250,8 @@ func (r *UserRepository) VerifyPassword(user *models.User, password string) bool
 
 // EmailExists 检查邮箱是否已存在
 func (r *UserRepository) EmailExists(email string, excludeUserID ...string) (bool, error) {
-	query := `SELECT COUNT(*) FROM users WHERE email = $1 AND status = 'active'`
-	args := []interface{}{email}
+	query := `SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER($1) AND status = 'active'`
+	args := []interface{}{security.NormalizeEmail(email)}
 
 	if len(excludeUserID) > 0 && excludeUserID[0] != "" {
 		query += ` AND id != $2`
@@ -294,6 +322,7 @@ func (r *UserRepository) GetUserByExternalID(externalID string) (*models.User, e
 
 // CreateUserFromOAuth2 从OAuth2信息创建用户
 func (r *UserRepository) CreateUserFromOAuth2(externalID, username, email string) (*models.User, error) {
+	email = security.NormalizeEmail(email)
 	query := `
 		INSERT INTO users (username, email, external_id, password_hash, role, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
