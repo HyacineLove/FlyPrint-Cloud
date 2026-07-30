@@ -81,7 +81,7 @@ func TestIdentityTokenTravelsFromIdentityThroughPortalClaimWithoutEnteringCloud(
 	portal.Handler().ServeHTTP(callback, httptest.NewRequest(
 		http.MethodGet, "/auth/callback?state="+state+"&code=identity-code", nil,
 	))
-	if callback.Code != http.StatusOK {
+	if callback.Code != http.StatusSeeOther {
 		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body)
 	}
 

@@ -315,7 +315,7 @@ git commit -m "feat: add isolated PDF storage to PRP demo"
 - Produces: `POST /api/files/upload-context`.
 - Site Portal has no route that accepts multipart file bytes.
 
-- [ ] **Step 1: Write failing browser-session tests**
+- [x] **Step 1: Write failing browser-session tests**
 
 Test that a session stores `ExternalUserID`, `DisplayName`, `PRPBaseURL`, `AccessToken`, `AccessTokenExpiresAt`, and session expiry in process memory, while the cookie value is only a random lookup key.
 
@@ -324,7 +324,7 @@ func TestLoginCallbackSetsOpaqueBrowserSessionCookie(t *testing.T)
 func TestBrowserSessionExpiryRemovesPRPCredential(t *testing.T)
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 go test . -run 'Test(LoginCallbackSetsOpaque|BrowserSessionExpiry)' -v
@@ -332,11 +332,11 @@ go test . -run 'Test(LoginCallbackSetsOpaque|BrowserSessionExpiry)' -v
 
 Expected: failure because no user browser session exists.
 
-- [ ] **Step 3: Implement browser sessions**
+- [x] **Step 3: Implement browser sessions**
 
 On successful identity callback, create the browser session independently from the Edge claim. Set `HttpOnly`, `SameSite=Lax`, `Path=/`, and conditional `Secure`. Do not delete it when the Edge redeems its claim. After Cloud accepts the login completion, redirect the browser to `/files`; the Edge notification remains unchanged.
 
-- [ ] **Step 4: Write failing PRP boundary test**
+- [x] **Step 4: Write failing PRP boundary test**
 
 Use an HTTP test server that records the request. Assert:
 
@@ -347,7 +347,7 @@ if strings.Contains(request.URL.String(), "private-prp-token") { t.Fatal(...) }
 
 Return a complete upload-context response and assert Site Portal forwards only `upload_context`, `expires_at`, and the configured public `upload_url`.
 
-- [ ] **Step 5: Implement PRP client and routes**
+- [x] **Step 5: Implement PRP client and routes**
 
 Add configuration:
 
@@ -367,17 +367,17 @@ SITE_PORTAL_USER_SESSION_TTL
 
 When upload is disabled, both routes return 404.
 
-- [ ] **Step 6: Prove Site Portal cannot receive files**
+- [x] **Step 6: Prove Site Portal cannot receive files**
 
 Add a handler test that posts multipart bytes to `/api/v1/files` and expects 404. Assert no Site Portal test fake receives the file payload.
 
-- [ ] **Step 7: Run GREEN**
+- [x] **Step 7: Run GREEN**
 
 ```powershell
 go test . -v
 ```
 
-- [ ] **Step 8: Commit Cloud repository**
+- [x] **Step 8: Commit Cloud repository**
 
 ```powershell
 git add site-portal

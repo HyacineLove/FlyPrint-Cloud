@@ -42,6 +42,19 @@ type fakeIdentityBoundary struct {
 	opsRequestBody []byte
 }
 
+type fakePRPBoundary struct {
+	result      uploadContextResult
+	err         error
+	accessToken string
+	calls       int
+}
+
+func (f *fakePRPBoundary) createUploadContext(accessToken string) (uploadContextResult, error) {
+	f.calls++
+	f.accessToken = accessToken
+	return f.result, f.err
+}
+
 func (f *fakeIdentityBoundary) exchangeCode(_ string) (identityResult, error) {
 	return f.result, f.err
 }
@@ -65,9 +78,12 @@ func testPortalConfig() configuration {
 		IdentityBrowserBaseURL: "https://identity.example.test",
 		IdentityCallbackURL:    "https://portal.example.test/auth/callback",
 		PRPBaseURL:             "https://prp.example.test",
+		PRPAPIBaseURL:          "https://prp-internal.example.test",
+		UploadEnabled:          true,
 		LoginStateTTL:          5 * time.Minute,
 		ClaimTTL:               5 * time.Minute,
 		OpsSessionTTL:          time.Hour,
+		UserSessionTTL:         time.Hour,
 	}
 }
 
@@ -92,7 +108,7 @@ func TestSuccessfulLoginCreatesClaimThenReportsCloud(t *testing.T) {
 	server.Handler().ServeHTTP(recorder, httptest.NewRequest(
 		http.MethodGet, "/auth/callback?state="+state+"&code=identity-code", nil,
 	))
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusSeeOther {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
 	}
 	if cloud.completeCalls != 1 || cloud.completion.ExternalUserID != "external-user-1" {
@@ -191,5 +207,61 @@ func TestOpsDeleteUserProxiesToIdentityService(t *testing.T) {
 		len(identity.opsRequestBody) != 0 {
 		t.Fatalf("unexpected identity request: method=%q path=%q token=%q body=%q",
 			identity.opsMethod, identity.opsPath, identity.opsToken, identity.opsRequestBody)
+	}
+}
+
+func TestUploadContextRouteReturnsNoPRPAccessTokenAndPortalRejectsFiles(t *testing.T) {
+	server := newPortalServer(testPortalConfig(), &fakeCloudBoundary{}, &fakeIdentityBoundary{})
+	now := time.Now().UTC()
+	prp := &fakePRPBoundary{result: uploadContextResult{
+		UploadContext: "one-use-context",
+		ExpiresAt:     now.Add(time.Minute),
+		UploadURL:     "https://prp.example.test/api/v1/files",
+	}}
+	server.prp = prp
+	sessionKey := server.userSessions.create(browserSession{
+		ExternalUserID: "user-1", DisplayName: "张老师",
+		PRPBaseURL: "https://prp.example.test", AccessToken: "private-prp-token",
+		AccessTokenExpiresAt: now.Add(5 * time.Minute), ExpiresAt: now.Add(time.Hour),
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/files/upload-context", strings.NewReader(`{}`))
+	request.AddCookie(&http.Cookie{Name: userCookieName, Value: sessionKey})
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated ||
+		prp.calls != 1 || prp.accessToken != "private-prp-token" ||
+		strings.Contains(recorder.Body.String(), "private-prp-token") {
+		t.Fatalf("status=%d body=%s prp=%#v", recorder.Code, recorder.Body, prp)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(output) != 3 || output["upload_context"] != "one-use-context" {
+		t.Fatalf("output=%#v", output)
+	}
+
+	filesRequest := httptest.NewRequest(http.MethodGet, "/files", nil)
+	filesRequest.AddCookie(&http.Cookie{Name: userCookieName, Value: sessionKey})
+	filesRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(filesRecorder, filesRequest)
+	if filesRecorder.Code != http.StatusOK ||
+		!strings.Contains(filesRecorder.Body.String(), `type="file"`) ||
+		strings.Contains(filesRecorder.Body.String(), "private-prp-token") ||
+		strings.Contains(filesRecorder.Body.String(), "localStorage") ||
+		strings.Contains(filesRecorder.Body.String(), "sessionStorage") {
+		t.Fatalf("files status=%d body=%s", filesRecorder.Code, filesRecorder.Body)
+	}
+
+	multipartRequest := httptest.NewRequest(
+		http.MethodPost, "/api/v1/files",
+		strings.NewReader("private file bytes"),
+	)
+	multipartRequest.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	multipartRecorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(multipartRecorder, multipartRequest)
+	if multipartRecorder.Code != http.StatusNotFound || prp.calls != 1 {
+		t.Fatalf("multipart status=%d prp calls=%d", multipartRecorder.Code, prp.calls)
 	}
 }

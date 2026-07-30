@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const opsCookieName = "flyprint_site_portal_ops"
+const (
+	opsCookieName  = "flyprint_site_portal_ops"
+	userCookieName = "flyprint_site_portal_user"
+)
 
 type configuration struct {
 	Code                   string
@@ -26,9 +29,12 @@ type configuration struct {
 	IdentityClientSecret   string
 	IdentityCallbackURL    string
 	PRPBaseURL             string
+	PRPAPIBaseURL          string
+	UploadEnabled          bool
 	LoginStateTTL          time.Duration
 	ClaimTTL               time.Duration
 	OpsSessionTTL          time.Duration
+	UserSessionTTL         time.Duration
 	CookieSecure           bool
 }
 
@@ -55,27 +61,37 @@ func (c configuration) validate() error {
 	if len(c.CloudAPIToken) < 32 || len(c.IdentityClientSecret) < 32 {
 		return fmt.Errorf("Site Portal service credentials must be at least 32 characters")
 	}
-	if c.LoginStateTTL <= 0 || c.ClaimTTL <= 0 || c.OpsSessionTTL <= 0 {
+	if c.LoginStateTTL <= 0 || c.ClaimTTL <= 0 || c.OpsSessionTTL <= 0 || c.UserSessionTTL <= 0 {
 		return fmt.Errorf("Site Portal TTL values must be positive")
+	}
+	if c.UploadEnabled {
+		parsed, err := url.Parse(c.PRPAPIBaseURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("Site Portal PRP API URL must use an absolute HTTP(S) URL")
+		}
 	}
 	return nil
 }
 
 type portalServer struct {
-	config      configuration
-	cloud       cloudBoundary
-	identity    identityBoundary
-	loginStates *loginStateStore
-	claims      *claimStore
-	opsSessions *localOpsSessionStore
-	now         func() time.Time
+	config       configuration
+	cloud        cloudBoundary
+	identity     identityBoundary
+	loginStates  *loginStateStore
+	claims       *claimStore
+	opsSessions  *localOpsSessionStore
+	userSessions *browserSessionStore
+	prp          prpBoundary
+	now          func() time.Time
 }
 
 func newPortalServer(config configuration, cloud cloudBoundary, identity identityBoundary) *portalServer {
 	return &portalServer{
 		config: config, cloud: cloud, identity: identity,
 		loginStates: newLoginStateStore(), claims: newClaimStore(),
-		opsSessions: newLocalOpsSessionStore(), now: time.Now,
+		opsSessions: newLocalOpsSessionStore(), userSessions: newBrowserSessionStore(),
+		prp: &prpClient{baseURL: strings.TrimRight(config.PRPAPIBaseURL, "/"), client: http.DefaultClient},
+		now: time.Now,
 	}
 }
 
@@ -87,6 +103,10 @@ func (s *portalServer) Handler() http.Handler {
 	mux.HandleFunc("GET /entry", s.entry)
 	mux.HandleFunc("GET /auth/callback", s.authCallback)
 	mux.HandleFunc("POST /api/claims/redeem", s.redeemClaim)
+	if s.config.UploadEnabled {
+		mux.HandleFunc("GET /files", s.filesPage)
+		mux.HandleFunc("POST /api/files/upload-context", s.createFileUploadContext)
+	}
 	mux.HandleFunc("GET /ops", s.opsPage)
 	mux.HandleFunc("POST /api/ops/login", s.opsLogin)
 	mux.HandleFunc("POST /api/ops/logout", s.opsLogout)
@@ -173,8 +193,21 @@ func (s *portalServer) authCallback(w http.ResponseWriter, r *http.Request) {
 		renderPortalError(w, http.StatusBadGateway, "登录结果未送达", "请返回打印终端重新扫码。")
 		return
 	}
-	renderPortalPage(w, http.StatusOK, "登录完成",
-		`<h1>登录成功</h1><p>请返回打印终端继续操作。</p>`)
+	sessionExpiresAt := s.now().Add(s.config.UserSessionTTL)
+	if identity.ExpiresAt.Before(sessionExpiresAt) {
+		sessionExpiresAt = identity.ExpiresAt
+	}
+	sessionKey := s.userSessions.create(browserSession{
+		ExternalUserID: identity.ExternalUserID, DisplayName: identity.DisplayName,
+		PRPBaseURL: s.config.PRPBaseURL, AccessToken: identity.AccessToken,
+		AccessTokenExpiresAt: identity.ExpiresAt, ExpiresAt: sessionExpiresAt,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name: userCookieName, Value: sessionKey, Path: "/", HttpOnly: true,
+		Secure: s.config.CookieSecure, SameSite: http.SameSiteLaxMode,
+		Expires: sessionExpiresAt,
+	})
+	http.Redirect(w, r, "/files", http.StatusSeeOther)
 }
 
 func (s *portalServer) redeemClaim(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +233,63 @@ func (s *portalServer) redeemClaim(w http.ResponseWriter, r *http.Request) {
 		"access_token":            value.AccessToken,
 		"access_token_expires_at": value.AccessTokenExpiresAt,
 	})
+}
+
+func (s *portalServer) userSession(r *http.Request) (browserSession, bool) {
+	cookie, err := r.Cookie(userCookieName)
+	if err != nil {
+		return browserSession{}, false
+	}
+	return s.userSessions.get(cookie.Value, s.now())
+}
+
+func (s *portalServer) filesPage(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.userSession(r)
+	if !ok || !session.AccessTokenExpiresAt.After(s.now()) {
+		renderPortalError(w, http.StatusUnauthorized, "登录已失效", "请返回打印终端重新扫码登录。")
+		return
+	}
+	body := `<h1>上传打印文件</h1><p>当前用户：` + template.HTMLEscapeString(session.DisplayName) +
+		`</p><input id="pdf" type="file" accept="application/pdf,.pdf"><button id="upload">上传 PDF</button><p id="result" class="muted">请选择一个 PDF 文件。</p>
+<script>
+const input=document.getElementById('pdf'),button=document.getElementById('upload'),result=document.getElementById('result');
+button.onclick=async()=>{
+  const file=input.files[0];if(!file){result.textContent='请先选择 PDF 文件。';return}
+  button.disabled=true;result.textContent='正在申请上传…';
+  try{
+    const contextResponse=await fetch('/api/files/upload-context',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const context=await contextResponse.json();if(!contextResponse.ok)throw new Error('无法创建上传任务');
+    const form=new FormData();form.append('file',file);
+    await new Promise((resolve,reject)=>{
+      const request=new XMLHttpRequest();request.open('POST',context.upload_url);
+      request.setRequestHeader('Authorization','Bearer '+context.upload_context);
+      request.upload.onprogress=event=>{if(event.lengthComputable)result.textContent='上传中 '+Math.round(event.loaded/event.total*100)+'%'};
+      request.onload=()=>request.status>=200&&request.status<300?resolve():reject(new Error('上传失败'));
+      request.onerror=()=>reject(new Error('上传失败'));request.send(form);
+    });
+    input.value='';result.textContent='上传成功，可返回打印终端选择文件。';
+  }catch(error){result.textContent=error.message}finally{button.disabled=false}
+};
+</script>`
+	renderPortalPage(w, http.StatusOK, "上传打印文件", body)
+}
+
+func (s *portalServer) createFileUploadContext(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.userSession(r)
+	if !ok {
+		writePortalJSON(w, http.StatusUnauthorized, map[string]string{"error": "user_session_invalid"})
+		return
+	}
+	if !session.AccessTokenExpiresAt.After(s.now()) {
+		writePortalJSON(w, http.StatusUnauthorized, map[string]string{"error": "prp_token_expired"})
+		return
+	}
+	result, err := s.prp.createUploadContext(session.AccessToken)
+	if err != nil {
+		writePortalJSON(w, http.StatusBadGateway, map[string]string{"error": "prp_unavailable"})
+		return
+	}
+	writePortalJSON(w, http.StatusCreated, result)
 }
 
 func (s *portalServer) opsPage(w http.ResponseWriter, _ *http.Request) {
