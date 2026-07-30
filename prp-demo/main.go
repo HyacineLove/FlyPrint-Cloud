@@ -16,6 +16,11 @@ func main() {
 		audience:       config.TokenAudience,
 		sitePortalCode: config.SitePortalCode,
 	}
+	server, err := newServer(config, verifier)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer server.close()
 	log.Printf("PRP Demo listening on %s", address)
-	log.Fatal(http.ListenAndServe(address, newServer(config, verifier).Handler()))
+	log.Fatal(http.ListenAndServe(address, server.Handler()))
 }

@@ -7,9 +7,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const defaultMaxFileSizeBytes int64 = 50 * 1024 * 1024
+
+const (
+	defaultFileTTL          = 7 * 24 * time.Hour
+	defaultUploadContextTTL = 5 * time.Minute
+)
 
 type configuration struct {
 	DataDir              string
@@ -21,6 +27,8 @@ type configuration struct {
 	AllowedUploadOrigins []string
 	PublicBaseURL        string
 	MaxFileSizeBytes     int64
+	FileTTL              time.Duration
+	UploadContextTTL     time.Duration
 }
 
 func (c configuration) validate() error {
@@ -31,7 +39,9 @@ func (c configuration) validate() error {
 		strings.TrimSpace(c.TokenAudience) == "" ||
 		strings.TrimSpace(c.SitePortalCode) == "" ||
 		len(c.AllowedUploadOrigins) == 0 ||
-		c.MaxFileSizeBytes <= 0 {
+		c.MaxFileSizeBytes <= 0 ||
+		c.FileTTL <= 0 ||
+		c.UploadContextTTL <= 0 {
 		return fmt.Errorf("PRP Demo configuration is incomplete")
 	}
 	dataDir, err := filepath.Abs(c.DataDir)
@@ -99,6 +109,8 @@ func configurationFromEnvironment() (configuration, string, error) {
 		AllowedUploadOrigins: splitNonEmpty(os.Getenv("PRP_ALLOWED_UPLOAD_ORIGINS")),
 		PublicBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("PRP_PUBLIC_BASE_URL")), "/"),
 		MaxFileSizeBytes:     maxFileSize,
+		FileTTL:              defaultFileTTL,
+		UploadContextTTL:     defaultUploadContextTTL,
 	}
 	if err := config.validate(); err != nil {
 		return configuration{}, "", err

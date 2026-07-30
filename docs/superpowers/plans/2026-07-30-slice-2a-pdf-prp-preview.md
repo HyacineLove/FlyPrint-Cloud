@@ -208,7 +208,7 @@ git commit -m "feat: add authenticated PRP demo skeleton"
 - Produces: `GET /api/v1/files/{id}/content`.
 - SQLite driver: `modernc.org/sqlite`.
 
-- [ ] **Step 1: Write failing upload-context tests**
+- [x] **Step 1: Write failing upload-context tests**
 
 Cover one-use and binding behavior:
 
@@ -226,11 +226,11 @@ go test . -run TestUploadContext -v
 
 Expected: compile failure because the store is absent.
 
-- [ ] **Step 2: Implement upload-context store**
+- [x] **Step 2: Implement upload-context store**
 
 Use a mutex-protected in-memory map keyed by 32 random bytes encoded as lowercase hex. `consume` deletes before checking expiry so expired or attempted contexts cannot be retried.
 
-- [ ] **Step 3: Write failing real-store HTTP test**
+- [x] **Step 3: Write failing real-store HTTP test**
 
 Start the real handler with a temporary SQLite database and volume directory. Create an upload context, upload the literal bytes of a valid one-page PDF fixture, list as the same user, download, and compare:
 
@@ -242,7 +242,7 @@ if !bytes.Equal(download.Body.Bytes(), pdfFixture) { t.Fatal("download changed b
 
 Also verify another subject sees an empty list and receives `404 file_not_found` for the first user's file.
 
-- [ ] **Step 4: Run RED**
+- [x] **Step 4: Run RED**
 
 ```powershell
 go test . -run TestPDFUploadListDownloadIsUserIsolated -v
@@ -250,7 +250,7 @@ go test . -run TestPDFUploadListDownloadIsUserIsolated -v
 
 Expected: route returns 404 because file APIs are absent.
 
-- [ ] **Step 5: Implement SQLite schema and PDF upload**
+- [x] **Step 5: Implement SQLite schema and PDF upload**
 
 Create the table:
 
@@ -273,21 +273,21 @@ CREATE INDEX IF NOT EXISTS idx_files_owner_created
 
 For 2A accept only `.pdf`, `application/pdf`, and `%PDF-` file signature. Enforce `PRP_MAX_FILE_SIZE_BYTES` while streaming. Sanitize the display name with `filepath.Base`; generate storage paths from server IDs, never from user names. Stream to `/data/tmp/{generated-id}.part`, hash while copying, `fsync`, atomically rename to `/data/files/{generated-id}.pdf`, then insert metadata.
 
-- [ ] **Step 6: Implement list and download**
+- [x] **Step 6: Implement list and download**
 
 Validate `page >= 1`, `1 <= page_size <= 50`. List only the authenticated subject. Download by `(id, owner_subject)`, set `Content-Disposition`, `Content-Type`, `Content-Length`, and `X-Content-SHA256`, and update `last_downloaded_at` only after `io.Copy` succeeds.
 
-- [ ] **Step 7: Implement exact CORS**
+- [x] **Step 7: Implement exact CORS**
 
 For upload routes, reflect only a configured exact Origin and handle `OPTIONS`. Allow `POST`, `OPTIONS`, `Authorization`, and `Content-Type`; never emit `Access-Control-Allow-Origin: *`.
 
-- [ ] **Step 8: Run GREEN**
+- [x] **Step 8: Run GREEN**
 
 ```powershell
 go test . -v
 ```
 
-- [ ] **Step 9: Commit Cloud repository**
+- [x] **Step 9: Commit Cloud repository**
 
 ```powershell
 git add prp-demo
