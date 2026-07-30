@@ -17,6 +17,7 @@ import (
 	"fly-print-cloud/api/internal/integration"
 	"fly-print-cloud/api/internal/logger"
 	"fly-print-cloud/api/internal/middleware"
+	"fly-print-cloud/api/internal/models"
 	"fly-print-cloud/api/internal/operations"
 	"fly-print-cloud/api/internal/security"
 	"fly-print-cloud/api/internal/storage"
@@ -107,6 +108,18 @@ func main() {
 
 	// 初始化服务
 	userRepo := database.NewUserRepository(db)
+	sitePortalRepo := database.NewSitePortalRepository(db)
+	externalIdentityRepo := database.NewExternalIdentityRepository(db)
+	if cfg.SitePortalBootstrap.Code != "" {
+		if err := sitePortalRepo.UpsertBootstrap(&models.SitePortal{
+			Code:         cfg.SitePortalBootstrap.Code,
+			DisplayName:  cfg.SitePortalBootstrap.DisplayName,
+			EntryURL:     cfg.SitePortalBootstrap.EntryURL,
+			ClaimBaseURL: cfg.SitePortalBootstrap.ClaimBaseURL,
+		}, cfg.SitePortalBootstrap.APIToken); err != nil {
+			logger.Fatal("Failed to initialize Site Portal", zap.Error(err))
+		}
+	}
 	edgeNodeRepo := database.NewEdgeNodeRepository(db)
 	printerRepo := database.NewPrinterRepository(db)
 	printJobRepo := database.NewPrintJobRepository(db)
@@ -228,7 +241,8 @@ func main() {
 	fileHandler := handlers.NewFileHandler(fileRepo, &cfg.Storage, storageService, wsManager, tokenManager, businessSettingsService, edgeNodeRepo, printerRepo)
 	fileHandler.SetTerminalUploadSessionBinder(terminalUploadSessions)
 	fileHandler.SetTerminalSessionMatcher(terminalSessionRepo)
-	terminalTicketHandler := handlers.NewTerminalTicketHandler(terminalTicketRepo, printerRepo, edgeNodeRepo, integrationProviderRepo, terminalUploadSessions, tokenManager, wsManager, terminalSessionRepo)
+	terminalTicketHandler := handlers.NewTerminalTicketHandler(terminalTicketRepo, printerRepo, edgeNodeRepo, integrationProviderRepo, terminalUploadSessions, tokenManager, wsManager, terminalSessionRepo, sitePortalRepo)
+	sitePortalHandler := handlers.NewSitePortalHandler(sitePortalRepo, terminalTicketRepo, terminalSessionRepo, externalIdentityRepo, wsManager)
 	integrationProviderHandler := handlers.NewIntegrationProviderHandler(integrationProviderRepo, printJobRepo, oauth2SecretCipher, cfg.Integration.RedisURL)
 	integrationPrintRequestHandler := handlers.NewIntegrationPrintRequestHandler(integrationProviderRepo, integrationRequestRepo, oauth2SecretCipher, integrationNonceStore)
 	businessSettingsHandler := handlers.NewBusinessSettingsHandler(businessSettingsService)
@@ -260,7 +274,7 @@ func main() {
 	r.Use(middleware.SecurityHeadersMiddleware())
 
 	// 设置路由
-	setupRoutes(r, userHandler, edgeNodeHandler, edgeActivationHandler, printerHandler, printJobHandler, wsHandler, oauth2Handler, fileHandler, terminalTicketHandler, integrationProviderHandler, integrationPrintRequestHandler, businessSettingsHandler, opsContactHandler, healthHandler, printJobRepo, edgeNodeRepo, printerRepo, alertRepo)
+	setupRoutes(r, userHandler, edgeNodeHandler, edgeActivationHandler, printerHandler, printJobHandler, wsHandler, oauth2Handler, fileHandler, terminalTicketHandler, sitePortalHandler, integrationProviderHandler, integrationPrintRequestHandler, businessSettingsHandler, opsContactHandler, healthHandler, printJobRepo, edgeNodeRepo, printerRepo, alertRepo)
 
 	// 创建HTTP服务器
 	serverAddr := cfg.Server.GetServerAddr()
@@ -296,7 +310,7 @@ func main() {
 	logger.Info("Server exited")
 }
 
-func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandler *handlers.EdgeNodeHandler, edgeActivationHandler *handlers.EdgeActivationHandler, printerHandler *handlers.PrinterHandler, printJobHandler *handlers.PrintJobHandler, wsHandler *websocket.WebSocketHandler, oauth2Handler *handlers.OAuth2Handler, fileHandler *handlers.FileHandler, terminalTicketHandler *handlers.TerminalTicketHandler, integrationProviderHandler *handlers.IntegrationProviderHandler, integrationPrintRequestHandler *handlers.IntegrationPrintRequestHandler, businessSettingsHandler *handlers.BusinessSettingsHandler, opsContactHandler *handlers.OpsContactHandler, healthHandler *handlers.HealthHandler, printJobRepo *database.PrintJobRepository, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, alertRepo *database.OperationalAlertRepository) {
+func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandler *handlers.EdgeNodeHandler, edgeActivationHandler *handlers.EdgeActivationHandler, printerHandler *handlers.PrinterHandler, printJobHandler *handlers.PrintJobHandler, wsHandler *websocket.WebSocketHandler, oauth2Handler *handlers.OAuth2Handler, fileHandler *handlers.FileHandler, terminalTicketHandler *handlers.TerminalTicketHandler, sitePortalHandler *handlers.SitePortalHandler, integrationProviderHandler *handlers.IntegrationProviderHandler, integrationPrintRequestHandler *handlers.IntegrationPrintRequestHandler, businessSettingsHandler *handlers.BusinessSettingsHandler, opsContactHandler *handlers.OpsContactHandler, healthHandler *handlers.HealthHandler, printJobRepo *database.PrintJobRepository, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, alertRepo *database.OperationalAlertRepository) {
 	r.GET("/entry", terminalTicketHandler.EntryPage)
 	// Swagger 文档路由
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -323,6 +337,12 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 	// 统一 API 路由组（/api/v1）- OAuth2 Resource Server
 	apiV1Group := r.Group("/api/v1")
 	{
+		sitePortalGroup := apiV1Group.Group("/site-portal")
+		{
+			sitePortalGroup.POST("/context", sitePortalHandler.Context)
+			sitePortalGroup.POST("/login-completions", sitePortalHandler.CompleteLogin)
+		}
+
 		apiV1Group.POST("/public/terminal-entry/select", terminalTicketHandler.SelectEntry)
 		integrationGroup := apiV1Group.Group("/integrations/:provider/print-requests")
 		{

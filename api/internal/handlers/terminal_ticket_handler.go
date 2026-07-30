@@ -27,12 +27,13 @@ type TerminalTicketHandler struct {
 	providers      *database.IntegrationProviderRepository
 	uploadSessions *database.TerminalUploadSessionRepository
 	sessions       *database.TerminalSessionRepository
+	sitePortals    *database.SitePortalRepository
 	tokens         *security.TokenManager
 	wsManager      *websocket.ConnectionManager
 }
 
-func NewTerminalTicketHandler(tickets *database.TerminalTicketRepository, printers *database.PrinterRepository, edgeNodes *database.EdgeNodeRepository, providers *database.IntegrationProviderRepository, uploadSessions *database.TerminalUploadSessionRepository, tokens *security.TokenManager, wsManager *websocket.ConnectionManager, sessions *database.TerminalSessionRepository) *TerminalTicketHandler {
-	return &TerminalTicketHandler{tickets: tickets, printers: printers, edgeNodes: edgeNodes, providers: providers, uploadSessions: uploadSessions, sessions: sessions, tokens: tokens, wsManager: wsManager}
+func NewTerminalTicketHandler(tickets *database.TerminalTicketRepository, printers *database.PrinterRepository, edgeNodes *database.EdgeNodeRepository, providers *database.IntegrationProviderRepository, uploadSessions *database.TerminalUploadSessionRepository, tokens *security.TokenManager, wsManager *websocket.ConnectionManager, sessions *database.TerminalSessionRepository, sitePortals *database.SitePortalRepository) *TerminalTicketHandler {
+	return &TerminalTicketHandler{tickets: tickets, printers: printers, edgeNodes: edgeNodes, providers: providers, uploadSessions: uploadSessions, sessions: sessions, sitePortals: sitePortals, tokens: tokens, wsManager: wsManager}
 }
 
 func (h *TerminalTicketHandler) EntryPage(c *gin.Context) {
@@ -92,22 +93,10 @@ func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
 		renderEntryError(c, http.StatusForbidden, "terminal unavailable", "This terminal is disabled or offline.", false)
 		return
 	}
-	source := node.LoginSource
-	if source == "" {
-		source = "official"
-	}
-	if !isValidTerminalLoginSource(source) {
+	portal, err := h.sitePortals.GetDefaultForNode(ticket.NodeID)
+	if err != nil {
 		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal login source is not configured correctly.", false)
 		return
-	}
-
-	var provider *models.IntegrationProvider
-	if source != "official" {
-		provider, err = h.providers.Get(source, false)
-		if err != nil || provider == nil || !provider.Enabled {
-			renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The configured provider is unavailable.", false)
-			return
-		}
 	}
 
 	printer, err := h.printers.GetPrinterByID(ticket.PrinterID)
@@ -116,35 +105,31 @@ func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
 		return
 	}
 
-	selected, err := h.tickets.Select(ticket.TicketHash, source, time.Now())
+	selected, err := h.tickets.Select(ticket.TicketHash, portal.Code, time.Now())
 	if err != nil {
 		renderEntryError(c, http.StatusConflict, "terminal ticket expired", "The ticket is expired or has already been used.", false)
 		return
 	}
 	_ = h.uploadSessions.DeleteOpenForTicket(selected.TicketHash)
 
-	if source == "official" {
-		token, expiresAt, tokenErr := h.tokens.GenerateUploadToken(selected.NodeID, selected.PrinterID)
-		if tokenErr != nil || h.uploadSessions.Create(token, selected.TicketHash, selected.NodeID, selected.PrinterID, selected.TerminalSessionID, expiresAt) != nil {
-			renderEntryError(c, http.StatusServiceUnavailable, "official upload unavailable", "Official upload is temporarily unavailable.", true)
-			return
-		}
-		query := url.Values{"token": {token}, "node_id": {selected.NodeID}, "printer_id": {selected.PrinterID}}
-		c.Header("Cache-Control", "no-store")
-		c.Redirect(http.StatusFound, "/upload?"+query.Encode())
-		return
-	}
-
-	redirect, err := url.Parse(provider.EntryURL)
+	redirect, err := buildSitePortalEntryURL(portal.EntryURL, raw)
 	if err != nil {
 		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The configured provider entry is invalid.", false)
 		return
 	}
-	query := redirect.Query()
-	query.Set("terminal_ticket", raw)
-	redirect.RawQuery = query.Encode()
 	c.Header("Cache-Control", "no-store")
-	c.Redirect(http.StatusFound, redirect.String())
+	c.Redirect(http.StatusFound, redirect)
+}
+
+func buildSitePortalEntryURL(entryURL, terminalTicket string) (string, error) {
+	redirect, err := url.Parse(entryURL)
+	if err != nil || redirect.Scheme == "" || redirect.Host == "" {
+		return "", fmt.Errorf("invalid Site Portal entry URL")
+	}
+	query := redirect.Query()
+	query.Set("terminal_ticket", terminalTicket)
+	redirect.RawQuery = query.Encode()
+	return redirect.String(), nil
 }
 
 // redirectUploadTokenToEntry bridges the original Edge QR path into the entry

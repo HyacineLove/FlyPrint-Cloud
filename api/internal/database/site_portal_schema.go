@@ -17,6 +17,8 @@ func (db *DB) initSitePortalSchema() error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS default_site_portal_code VARCHAR(64)`,
+		`ALTER TABLE edge_nodes ALTER COLUMN default_site_portal_code SET DEFAULT 'official'`,
+		`UPDATE edge_nodes SET default_site_portal_code='official' WHERE default_site_portal_code IS NULL`,
 		`CREATE TABLE IF NOT EXISTS external_identities (
 			site_portal_code VARCHAR(64) NOT NULL REFERENCES site_portals(code),
 			external_user_id VARCHAR(255) NOT NULL,

@@ -84,6 +84,8 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		JOIN edge_terminal_sessions session ON session.node_id=ticket.node_id
 			AND session.terminal_session_id=ticket.terminal_session_id
 			AND session.terminal_ticket_hash=ticket.ticket_hash
+		JOIN edge_nodes node ON node.id=ticket.node_id
+			AND node.deleted_at IS NULL AND node.enabled=true
 		JOIN site_portals portal ON portal.code=$2
 		WHERE ticket.ticket_hash=$1
 		FOR UPDATE OF ticket`, input.TicketHash, input.SitePortalCode).Scan(

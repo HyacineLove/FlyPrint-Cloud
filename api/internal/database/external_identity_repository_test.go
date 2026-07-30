@@ -25,6 +25,8 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		JOIN edge_terminal_sessions session ON session.node_id=ticket.node_id
 			AND session.terminal_session_id=ticket.terminal_session_id
 			AND session.terminal_ticket_hash=ticket.ticket_hash
+		JOIN edge_nodes node ON node.id=ticket.node_id
+			AND node.deleted_at IS NULL AND node.enabled=true
 		JOIN site_portals portal ON portal.code=$2
 		WHERE ticket.ticket_hash=$1
 		FOR UPDATE OF ticket`)).
@@ -104,6 +106,34 @@ func TestCompletePortalLoginRejectsInactiveMappedUserWithoutConsumingTicket(t *t
 		Now:            now,
 	})
 	if !errors.Is(err, ErrExternalIdentityDisabled) {
+		t.Fatalf("CompleteLogin() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompletePortalLoginRequiresEnabledEdgeAtConsumption(t *testing.T) {
+	db, mock, closeDB := newUserRepositoryTestDB(t)
+	defer closeDB()
+	repo := NewExternalIdentityRepository(db)
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`JOIN edge_nodes node ON node.id=ticket.node_id
+			AND node.deleted_at IS NULL AND node.enabled=true`)).
+		WithArgs("ticket-hash", "official").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	_, err := repo.CompleteLogin(CompletePortalLoginInput{
+		SitePortalCode: "official",
+		TicketHash:     "ticket-hash",
+		ExternalUserID: "external-user-1",
+		DisplayName:    "张老师",
+		Now:            now,
+	})
+	if !errors.Is(err, ErrPortalLoginTicketInvalid) {
 		t.Fatalf("CompleteLogin() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
