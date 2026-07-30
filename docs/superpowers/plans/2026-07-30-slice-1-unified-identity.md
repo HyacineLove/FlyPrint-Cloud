@@ -504,37 +504,32 @@ git add portal_session.py site_portal_client.py interactive_session.py main.py c
 git commit -m "feat: claim site portal identity on edge"
 ```
 
-### Task 7: Add runnable local integration configuration
+### Task 7: Add component configuration and protocol integration coverage
 
 **Files (Cloud repository):**
-- Modify: `docker-compose.yml`
 - Modify: `.env.example`
 - Create: `site-portal/config.example.env`
 - Create: `sso-login-demo/config.example.env`
 - Create: `docs/agent/site-portal-identity-protocol.md`
+- Create: `site-portal/protocol_integration_test.go`
 
 **Interfaces:**
-- Produces official and private-demo instance configuration without production addresses or credentials.
+- Produces official and private-demo component configuration without production addresses or credentials.
+- Leaves the public integrated Docker Compose unchanged until Slice 6.
 
-- [ ] **Step 1: Add the two services and explicit non-secret example variables**
+- [ ] **Step 1: Add explicit non-secret example variables**
 
-```yaml
-sso-login-demo:
-  build: ./sso-login-demo
-  environment:
-    SSO_DATA_DIR: /data
-
-site-portal:
-  build: ./site-portal
-  environment:
-    SITE_PORTAL_CODE: official
-    CLOUD_API_BASE: http://api:8080
-    IDENTITY_BASE_URL: http://sso-login-demo:8080
+```dotenv
+SITE_PORTAL_CODE=official
+SITE_PORTAL_CLOUD_API_BASE=http://127.0.0.1:8080
+SITE_PORTAL_IDENTITY_BASE_URL=http://127.0.0.1:8081
+SITE_PORTAL_PRP_BASE_URL=http://127.0.0.1:8082
+SITE_PORTAL_API_TOKEN=replace-with-random-token
 ```
 
-- [ ] **Step 2: Validate Compose syntax**
+- [ ] **Step 2: Add a protocol integration test**
 
-Run: `docker compose config`
+Use `httptest.Server` instances for the identity service and Cloud boundary, then drive Site Portal entry, login callback, Cloud completion, and claim redemption. Assert the identity access token appears only in the final claim response and never in the fake Cloud request body.
 
 - [ ] **Step 3: Run all component tests**
 
@@ -547,8 +542,8 @@ Run from `sso-login-demo`: `go test ./...`
 - [ ] **Step 4: Commit integration configuration**
 
 ```powershell
-git add docker-compose.yml .env.example site-portal sso-login-demo docs/agent
-git commit -m "chore: configure slice one identity services"
+git add .env.example site-portal sso-login-demo docs/agent
+git commit -m "test: cover slice one identity protocol"
 ```
 
 ### Task 8: Verify the complete slice and update execution status
