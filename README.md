@@ -4,6 +4,21 @@ FlyPrint Cloud 是 FlyPrint 的云端控制面和文件服务。它负责认证�
 
 Cloud 不直接访问现场打印机。打印机发现、文档预览和实际打印由 FlyPrint Edge 完成。
 
+## 产品概览与边界
+
+FlyPrint 是由 Cloud 控制面和校区 Edge 一体机组成的云打印平台。Cloud 负责入口、身份、文件与凭证、任务编排、节点和打印机登记，以及第三方集成；Edge 负责展示二维码、让用户预览确认，并通过 IPP 向现场打印机出纸。学校管理侧只通过 Cloud 管理端管理和派单，第三方只能通过 Cloud 集成接口下单和接收回调。
+
+| 层级 | 当前范围 |
+|------|----------|
+| L0 产品 | FlyPrint 云打印平台（Cloud + Edge） |
+| L1 参与方 | Cloud、Edge、手机浏览器、现场 IPP 打印机、学校管理侧，以及可选第三方业务系统 |
+| L2 运行组成 | `nginx` 统一入口、`api` 控制面、管理端静态资源、PostgreSQL、Redis、MinIO（或本地存储），以及可选 `integration-demo` |
+| L3 能力域 | 身份与管理登录、节点与打印机、文件与凭证、扫码入口会话、打印任务、Edge WebSocket 通道、第三方 HMAC Provider |
+
+典型形态是一套 Cloud 服务多个校区，每校区部署一台 Edge；Edge 主动出站连接 Cloud，现场打印机只与本校 Edge 通信。公网通常仅由 `nginx` 暴露业务入口，数据库、缓存和对象存储不对公网暴露。
+
+**不可突破的边界：** Cloud 不直连现场打印机；用户必须在 Edge 上确认后才创建正式打印任务；第三方不得直连 Edge 或打印机，也不得绕过终端确认。每台 Edge 只配置一个登录源：`official` 或一个已启用的 Provider，用户扫码后不会再选择多个入口。
+
 ## 当前状态
 
 当前已经具备以下主要能力：
@@ -18,12 +33,12 @@ Cloud 不直接访问现场打印机。打印机发现、文档预览和实际�
 - 动态配置上传大小、文档页数、凭证有效期和允许的文件类型；
 - Swagger 接口页面。
 
-以下能力尚未完成或尚未形成可靠交付门禁：
+以下能力尚未完成或尚未形成稳定交付能力：
 
 - `Users` 和 `Settings` 页面仍是占位页面；
 - Dashboard 请求失败时仍可能回退到模拟趋势数据；
 - 没有持续集成流水线；
-- Cloud 与 Edge 的真实端到端测试、断线恢复和升级兼容测试尚未成为自动发布门禁；
+- Cloud 与 Edge 的真实端到端测试、断线恢复和升级兼容测试尚未满足自动发布前置条件；
 - 数据库结构变更由应用启动时执行，缺少带版本和回滚能力的迁移工具；
 - MinIO 镜像当前使用 `latest`，生产部署前应固定版本。
 
@@ -79,8 +94,7 @@ docker compose up --build -d
 
 **推荐阅读：**
 
-- 系统说明（产品架构与边界）：[`docs/系统说明.md`](docs/系统说明.md)
-- 部署与验证（默认 HTTPS；局域网见文内其他形态）：[`docs/部署与验证.md`](docs/部署与验证.md)
+- 部署与验证（公网 HTTP/80 或 HTTPS、局域网形态与验收）：[`docs/部署与验证.md`](docs/部署与验证.md)
 - 第三方对接：[`docs/第三方接入指南.md`](docs/第三方接入指南.md)
 **以上默认密钥/密码仅供本机或局域网演示，禁止用于公网或生产。** 要改端口、密码或密钥时再执行 `Copy-Item .env.example .env` 后编辑。第三方对接见 [`docs/第三方接入指南.md`](docs/第三方接入指南.md)。
 
@@ -264,18 +278,11 @@ Smoke/performance 脚本会读取同级工作区中的 `fly-print-edge/config.js
 7. 验证当前 Cloud 与 Edge 版本兼容；
 8. 确认 Users、Settings 等未完成功能没有被当成交付能力宣传。
 
-## 总体文档
+## 文档使用范围
 
-- **系统说明**：[`docs/系统说明.md`](docs/系统说明.md)
-- **部署与验证**：[`docs/部署与验证.md`](docs/部署与验证.md)
-- **第三方接入指南（接口契约）**：[`docs/第三方接入指南.md`](docs/第三方接入指南.md)
-- 发版勾选：[`docs/agent/release-plan.md`](docs/agent/release-plan.md)
-
-跨仓开发计划、当前进度和非技术使用说明位于工作区根目录：
-
-- `FlyPrint开发计划.md`；
-- `FlyPrint任务清单.md`；
-- `FlyPrint总开发计划.md`；
-- `FlyPrint后续开发方案.md`；
-- `FlyPrint目前进度汇总.md`；
-- `FlyPrint使用说明书.md`。
+- 本 README：产品概览、能力边界、运行组成、当前状态和本地启动入口；
+- `docs/部署与验证.md`：部署形态、配置、验收和安全更新；
+- `docs/使用指南.md`：用户、管理端和 Edge 本机的操作步骤；
+- `docs/运维指南.md`：学校侧巡检、派单、现场处置和升级；
+- `docs/第三方接入指南.md`：已实现 HMAC Provider 的接口契约，以及未实现 Site Portal 私有域 Provider 的边界说明；
+- `docs/agent/`：仅供开发 Agent 按任务读取的技术路由文档。

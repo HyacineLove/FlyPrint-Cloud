@@ -32,8 +32,8 @@ nginx/ + docker-compose.yml
 ## 二维码入口
 
 - 仅 Edge `/api/qr_code`。Cloud 回相对 `/entry?token=...`；Edge 用 `cloud.base_url` 拼接，并对 `localhost`/`127.0.0.1` **无条件**改写局域网 IP（代码不区分 http/https；HTTPS 应直接配证书域名）。`cloud.base_url` 支持 http(s)，WS 为 ws(s)。不依赖 `EXTERNAL_API_URL` 绝对地址。
-- `/entry` 校验上传凭证后签发独立 `terminal_ticket`；成功后下行 `terminal_occupied`（`msg_id` + Edge ACK；断线 pending，重连靠 `terminal_session_state` 补发）。官方再发上传凭证进 `/upload`；第三方只传终端票据。
-- 未消费前可回退 Entry 并重新选择入口（换发官方 upload token）；已上传/已提交三方单后拒绝再选。Edge 刷新会话作废未完成 ticket；官方上传/`verify` 须 `edge_terminal_sessions.Matches`；`preview_file` 须带 `terminal_session_id` + `terminal_ticket_hash`。
+- `/entry` 校验上传凭证后签发独立 `terminal_ticket`；成功后下行 `terminal_occupied`（`msg_id` + Edge ACK；断线 pending，重连靠 `terminal_session_state` 补发）。Cloud 按 Edge 的 `login_source` 直达官方上传或指定 Provider：官方再发上传凭证进 `/upload`；第三方只传终端票据。
+- 当前正式流程为每终端唯一登录源，不提供用户侧入口重选。Edge 刷新会话作废未完成 ticket；官方上传/`verify` 须 `edge_terminal_sessions.Matches`；`preview_file` 须带 `terminal_session_id` + `terminal_ticket_hash`。
 
 ## 部署边界
 
@@ -45,7 +45,7 @@ nginx/ + docker-compose.yml
 
 Cloud→Edge：`print_job`、`preview_file`、`upload_token`、`terminal_occupied`、`node_state`、`config_update`、`report_status`、`error`  
 Edge→Cloud：`edge_heartbeat`、`job_update`、`submit_print_params`、`request_upload_token`、`terminal_session_state`、`ack`  
-文件 payload 带 `content_hash` + 短期 `file_access_token`；Edge 现用 hash 作缓存键并验格式，**尚未**对下载字节重算 SHA-256。
+文件 payload 带 `content_hash` + 短期 `file_access_token`；Edge 校验 `content_hash` 格式并以其作为标准 PDF 缓存键。缓存未命中时，`DocumentPipeline.resolve_canonical` 对 `source_supplier` 提供的源文件计算 SHA-256，必须与 `content_hash` 一致后才进行标准化；缓存命中时直接复用已校验生成的标准 PDF，不重新获取源文件。
 
 ## 第三方交互式打印与 Demo
 
@@ -53,6 +53,7 @@ Edge→Cloud：`edge_heartbeat`、`job_update`、`submit_print_params`、`reques
 - 用户确认 → `submit_print_params` 回传上下文；Cloud 同事务校验后**每个集成请求仅一个**标准任务。官方分支不要求集成字段。
 - `allow_private_file_hosts` 默认关；开启后仍仅 `allowed_file_hosts` 精确主机，并拒绝环回/链路本地等。禁止当全局私网放行。
 - Demo：`integration-demo/`，provider=`livacloud-demo`，路径 `/integration-demo/`。模拟 SSO/HMAC/callback；禁止在核心链路加 provider 专属分支。密钥粘贴到 `/integration-demo/setup`，不回显、不落日志。
+- 当前实现的对接模型是 HMAC 公网 Provider。Site Portal 私有域 Provider 仅为规划目标，未实现；不得在协议、路由或配置中把它当作可用 Provider。
 
 ## 已知缺口（勿当已交付）
 
