@@ -36,7 +36,7 @@
 - Token wire format: `base64url(header).base64url(claims).base64url(hmacSHA256(signingInput))`.
 - Claims: `iss`, `aud`, `site_portal_code`, `sub`, `scope`, `iat`, `exp`, `jti`.
 
-- [ ] **Step 1: Write failing signer tests**
+- [x] **Step 1: Write failing signer tests**
 
 Add literal contract assertions:
 
@@ -55,9 +55,9 @@ func TestSignPRPTokenProducesThreeSegmentsAndPublicClaims(t *testing.T) {
 }
 ```
 
-Also assert that signing a different subject produces a different signature and that secrets never appear in the serialized token.
+Also assert that the signing secret never appears in the serialized token. The public-claims test independently proves that the requested subject is encoded.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run from `sso-login-demo`:
 
@@ -67,7 +67,7 @@ go test . -run TestSignPRPToken -v
 
 Expected: compile failure because `signPRPToken` and `prpTokenConfig` do not exist.
 
-- [ ] **Step 3: Implement signer and configuration**
+- [x] **Step 3: Implement signer and configuration**
 
 Add required environment variables:
 
@@ -80,7 +80,7 @@ SSO_SITE_PORTAL_CODE
 
 Reject secrets shorter than 32 characters. Use `crypto/rand` for `jti`, canonical JSON structs, `base64.RawURLEncoding`, and `hmac.Equal` only in verifier code.
 
-- [ ] **Step 4: Replace random access token**
+- [x] **Step 4: Replace random access token**
 
 In `exchangeCode`, sign a token for `grant.ExternalUserID` with scopes:
 
@@ -90,7 +90,7 @@ files:list files:download upload-context:create
 
 Keep the existing response fields `external_user_id`, `display_name`, `access_token`, and `expires_at` unchanged.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```powershell
 go test . -v
@@ -98,7 +98,7 @@ go test . -v
 
 Expected: all SSO Login Demo tests pass and response tests still observe a non-empty credential without printing it.
 
-- [ ] **Step 6: Commit Cloud repository**
+- [x] **Step 6: Commit Cloud repository**
 
 ```powershell
 git add sso-login-demo

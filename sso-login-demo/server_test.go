@@ -20,6 +20,7 @@ func testIdentityConfig(t *testing.T) configuration {
 		OperatorPassword:    "OperatorPass123!",
 		ClientSecret:        "12345678901234567890123456789012",
 		AllowedRedirectURIs: []string{"https://portal.example.test/auth/callback"},
+		PRPToken:            testPRPTokenConfig(),
 		CodeTTL:             time.Minute,
 		AccessTokenTTL:      5 * time.Minute,
 		OpsSessionTTL:       time.Hour,

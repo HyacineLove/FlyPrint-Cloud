@@ -20,6 +20,7 @@ type configuration struct {
 	OperatorPassword    string
 	ClientSecret        string
 	AllowedRedirectURIs []string
+	PRPToken            prpTokenConfig
 	CodeTTL             time.Duration
 	AccessTokenTTL      time.Duration
 	OpsSessionTTL       time.Duration
@@ -29,6 +30,9 @@ func (c configuration) validate() error {
 	if c.DataFile == "" || c.OperatorUsername == "" || c.OperatorPassword == "" ||
 		len(c.ClientSecret) < 32 || len(c.AllowedRedirectURIs) == 0 {
 		return fmt.Errorf("identity service configuration is incomplete")
+	}
+	if err := c.PRPToken.validate(); err != nil {
+		return err
 	}
 	for _, raw := range c.AllowedRedirectURIs {
 		parsed, err := url.Parse(raw)
@@ -232,11 +236,17 @@ func (s *server) exchangeCode(w http.ResponseWriter, r *http.Request) {
 		writeIdentityJSON(w, http.StatusConflict, map[string]string{"error": "authorization_code_unavailable"})
 		return
 	}
-	expiresAt := time.Now().Add(s.config.AccessTokenTTL).UTC()
+	issuedAt := time.Now().UTC()
+	expiresAt := issuedAt.Add(s.config.AccessTokenTTL)
+	accessToken, err := signPRPToken(s.config.PRPToken, grant.ExternalUserID, issuedAt, expiresAt)
+	if err != nil {
+		writeIdentityJSON(w, http.StatusInternalServerError, map[string]string{"error": "token_issue_failed"})
+		return
+	}
 	writeIdentityJSON(w, http.StatusOK, map[string]any{
 		"external_user_id": grant.ExternalUserID,
 		"display_name":     grant.DisplayName,
-		"access_token":     randomOpaqueToken(32),
+		"access_token":     accessToken,
 		"expires_at":       expiresAt,
 	})
 }

@@ -29,8 +29,14 @@ func configurationFromEnvironment() (configuration, string, error) {
 	operatorPassword := os.Getenv("SSO_OPERATOR_PASSWORD")
 	clientSecret := os.Getenv("SSO_CLIENT_SECRET")
 	redirects := splitNonEmpty(os.Getenv("SSO_ALLOWED_REDIRECT_URIS"))
-	if dataFile == "" || operatorUsername == "" || operatorPassword == "" || clientSecret == "" || len(redirects) == 0 {
-		return configuration{}, "", fmt.Errorf("SSO_DATA_FILE, SSO_OPERATOR_USERNAME, SSO_OPERATOR_PASSWORD, SSO_CLIENT_SECRET, and SSO_ALLOWED_REDIRECT_URIS are required")
+	prpTokenSecret := os.Getenv("SSO_PRP_TOKEN_SECRET")
+	prpTokenIssuer := strings.TrimSpace(os.Getenv("SSO_PRP_TOKEN_ISSUER"))
+	prpTokenAudience := strings.TrimSpace(os.Getenv("SSO_PRP_TOKEN_AUDIENCE"))
+	sitePortalCode := strings.TrimSpace(os.Getenv("SSO_SITE_PORTAL_CODE"))
+	if dataFile == "" || operatorUsername == "" || operatorPassword == "" || clientSecret == "" ||
+		len(redirects) == 0 || prpTokenSecret == "" || prpTokenIssuer == "" ||
+		prpTokenAudience == "" || sitePortalCode == "" {
+		return configuration{}, "", fmt.Errorf("SSO identity and PRP token configuration is required")
 	}
 	port := 8080
 	if raw := strings.TrimSpace(os.Getenv("SSO_PORT")); raw != "" {
@@ -46,9 +52,16 @@ func configurationFromEnvironment() (configuration, string, error) {
 		OperatorPassword:    operatorPassword,
 		ClientSecret:        clientSecret,
 		AllowedRedirectURIs: redirects,
-		CodeTTL:             time.Minute,
-		AccessTokenTTL:      5 * time.Minute,
-		OpsSessionTTL:       8 * time.Hour,
+		PRPToken: prpTokenConfig{
+			Secret:         prpTokenSecret,
+			Issuer:         prpTokenIssuer,
+			Audience:       prpTokenAudience,
+			SitePortalCode: sitePortalCode,
+			Scopes:         []string{"files:list", "files:download", "upload-context:create"},
+		},
+		CodeTTL:        time.Minute,
+		AccessTokenTTL: 5 * time.Minute,
+		OpsSessionTTL:  8 * time.Hour,
 	}, fmt.Sprintf(":%d", port), nil
 }
 
