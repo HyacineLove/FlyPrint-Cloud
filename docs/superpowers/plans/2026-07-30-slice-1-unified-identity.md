@@ -507,7 +507,6 @@ git commit -m "feat: claim site portal identity on edge"
 ### Task 7: Add component configuration and protocol integration coverage
 
 **Files (Cloud repository):**
-- Modify: `.env.example`
 - Create: `site-portal/config.example.env`
 - Create: `sso-login-demo/config.example.env`
 - Create: `docs/agent/site-portal-identity-protocol.md`
@@ -542,7 +541,7 @@ Run from `sso-login-demo`: `go test ./...`
 - [ ] **Step 4: Commit integration configuration**
 
 ```powershell
-git add .env.example site-portal sso-login-demo docs/agent
+git add site-portal sso-login-demo docs/agent
 git commit -m "test: cover slice one identity protocol"
 ```
 

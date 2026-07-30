@@ -4,13 +4,13 @@
 
 | 任务 | 文档 |
 |------|------|
-| **全局开发计划（先读）** | 工作区根目录 `../FlyPrint总开发计划.md`（本阶段唯一主文档；方案 A，无 `/Auth`） |
+| **全局开发计划（先读）** | 工作区根目录 `../FlyPrint总开发计划.md`（本阶段唯一主文档，无 `/Auth`） |
 | **开发任务清单（先读）** | 工作区根目录 `../FlyPrint开发任务清单.md` |
 | 差距对照 / 定稿数据流 | `../docs/私有域接入-现状与目标差距清单.md`、`../docs/diagrams/refactoring-change-map.drawio.png` |
 | 现状基线 | `../docs/现状系统说明.md`、`../docs/diagrams/current-dataflow.drawio.png` |
 | 协议 / 目录 / 第三方与 Demo | `docs/agent/architecture-and-protocols.md` |
 | 启动 / 路由 / 测试命令 | `docs/agent/operations-and-verification.md` |
-| http(s)/ws(s) 双兼容 | Provider/file URL 校验；Edge 见对仓 `url_scheme.py` |
+| http(s)/ws(s) 双兼容 | 第三方接入地址 / 文件 URL 校验；Edge 见对仓 `url_scheme.py` |
 | 人类部署入口 | `README.md`；细节见 `docs/部署与验证.md` |
 
 `../archive/` 是历史归档，**默认不读取、不参与范围与完成判定**；只有当前任务明确要求核对历史背景时才按需读取。旧私有域 `/Auth` / `target-dataflow` 口径见 `../archive/workspace/superseded-private-domain-2026-07-30/`。
@@ -23,8 +23,8 @@
 |------|-------------|--------------------------------|
 | `README.md` | 项目概览：L0～L3、能力边界、运行组成、当前状态 | 不写接口字段 → 第三方指南；不写安装步骤 → 部署与验证；L4+ 源码不入此册 |
 | `docs/系统说明.md` | 保留的历史产品说明 | 非默认任务路由；仅在任务明确要求核对历史内容时读取，不回写 |
-| `docs/部署与验证.md` | 安装、配置、公网 :80 / 局域网、检查单与排障 | 环境变量与网络；Provider 填值细节 → 第三方指南 §8；产品边界 → README |
-| `docs/第三方接入指南.md` | 已实现 HMAC Provider 的对接契约 | Demo `code`=`livacloud-demo`；部署变量 / 三类地址 → 部署与验证、README；Site Portal 私有域 Provider 未实现 |
+| `docs/部署与验证.md` | 安装、配置、公网 :80 / 局域网、检查单与排障 | 环境变量与网络；第三方接入填值细节 → 第三方指南 §8；产品边界 → README |
+| `docs/第三方接入指南.md` | 已实现 HMAC 第三方接入的对接契约 | Demo `code`=`livacloud-demo`；部署变量 / 三类地址 → 部署与验证、README；Site Portal 身份链路 → `docs/agent/site-portal-identity-protocol.md` |
 | `docs/使用指南.md` | 用户 / 管理端 / Edge 本机：怎么点界面 | 不讲职责与派单 → 运维指南 |
 | `docs/运维指南.md` | 四方角色、监控派单、报障时机 | 不讲逐步点屏 → 使用指南；现场截图式手册可并存 |
 | `docs/现场运维手册-学校侧.md` | 学校现场非技术日常（插图占位） | 与运维指南同受众时可二选一交接；不含云端改配置 |

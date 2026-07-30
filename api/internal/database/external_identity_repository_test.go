@@ -79,6 +79,52 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 	}
 }
 
+func TestCompletePortalLoginReusesExistingMapping(t *testing.T) {
+	db, mock, closeDB := newUserRepositoryTestDB(t)
+	defer closeDB()
+	repo := NewExternalIdentityRepository(db)
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT ticket.node_id").
+		WithArgs("ticket-hash", "official").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"node_id", "printer_id", "terminal_session_id", "selected_entry",
+			"status", "expires_at", "claim_base_url", "enabled",
+		}).AddRow("edge-1", "printer-1", "session-1", "official", "selected", now.Add(time.Minute),
+			"https://portal.example.test", true))
+	mock.ExpectQuery("SELECT identity.cloud_user_id").
+		WithArgs("official", "external-user-1").
+		WillReturnRows(sqlmock.NewRows([]string{"cloud_user_id", "status"}).AddRow("cloud-user-existing", "active"))
+	mock.ExpectExec("UPDATE external_identities SET display_name").
+		WithArgs("official", "external-user-1", "张老师", now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE users SET last_login").
+		WithArgs("cloud-user-existing", now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE terminal_tickets SET status='consumed'").
+		WithArgs("ticket-hash", now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	completion, err := repo.CompleteLogin(CompletePortalLoginInput{
+		SitePortalCode: "official",
+		TicketHash:     "ticket-hash",
+		ExternalUserID: "external-user-1",
+		DisplayName:    "张老师",
+		Now:            now,
+	})
+	if err != nil {
+		t.Fatalf("CompleteLogin() error = %v", err)
+	}
+	if completion.CloudUserID != "cloud-user-existing" {
+		t.Fatalf("CloudUserID = %q", completion.CloudUserID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompletePortalLoginRejectsInactiveMappedUserWithoutConsumingTicket(t *testing.T) {
 	db, mock, closeDB := newUserRepositoryTestDB(t)
 	defer closeDB()
