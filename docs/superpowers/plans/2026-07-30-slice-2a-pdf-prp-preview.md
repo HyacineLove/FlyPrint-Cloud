@@ -398,11 +398,11 @@ git commit -m "feat: add direct PRP upload page"
 - Produces: named volumes for SQLite and PRP files.
 - Internal Site Portal URL uses `http://prp-demo:8080`; browser and Edge use `PRP_PUBLIC_BASE_URL`.
 
-- [ ] **Step 1: Add PRP service and health dependency**
+- [x] **Step 1: Add PRP service and health dependency**
 
 Build from `prp-demo/`, mount one `/data` volume, expose only the configured public demo port, and add a health check. Configure identical non-secret placeholder values for SSO signer and PRP verifier through environment interpolation; `.env.example` must require operators to replace them.
 
-- [ ] **Step 2: Validate Compose**
+- [x] **Step 2: Validate Compose**
 
 ```powershell
 docker compose -p fly-print-cloud config --quiet
@@ -412,11 +412,11 @@ docker compose -p fly-print-cloud ps sso-login-demo prp-demo site-portal
 
 Expected: all three services become healthy.
 
-- [ ] **Step 3: Run live HTTP PDF upload**
+- [x] **Step 3: Run live HTTP PDF upload**
 
 Create a named Slice 2 Demo user through `/ops`, complete an SSO code exchange, create an upload context, upload a generated non-sensitive one-page PDF directly to port 8083, then list and download it. Keep this account and file for Task 9 browser verification; both remain bounded by the configured Demo TTL. Print only status codes, file IDs, sizes, and hashes; never print credentials.
 
-- [ ] **Step 4: Commit Cloud repository**
+- [x] **Step 4: Commit Cloud repository**
 
 ```powershell
 git add docker-compose.yml .env.example docs/部署与验证.md

@@ -166,11 +166,49 @@ services:
       - SSO_OPERATOR_PASSWORD=${SSO_OPERATOR_PASSWORD:-change-this-operator-password}
       - SSO_CLIENT_SECRET=${SITE_PORTAL_IDENTITY_CLIENT_SECRET:-change-this-identity-client-secret-32chars}
       - SSO_ALLOWED_REDIRECT_URIS=${SITE_PORTAL_PUBLIC_BASE_URL:-http://localhost:8082}/auth/callback
+      - SSO_PRP_TOKEN_SECRET=${PRP_TOKEN_SECRET:-replace-this-shared-prp-token-secret-32chars}
+      - SSO_PRP_TOKEN_ISSUER=flyprint-sso-demo
+      - SSO_PRP_TOKEN_AUDIENCE=flyprint-prp-demo
+      - SSO_SITE_PORTAL_CODE=${SITE_PORTAL_CODE:-official}
       - SSO_PORT=8080
     ports:
       - "${SSO_DEMO_PORT:-8081}:8080"
     volumes:
       - sso_login_demo_data:/data
+    networks:
+      - fly-print-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health | grep ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  prp-demo:
+    build:
+      context: ./prp-demo
+      dockerfile: Dockerfile
+    container_name: fly-print-prp-demo
+    environment:
+      - PRP_DATA_DIR=/data
+      - PRP_DATABASE_FILE=/data/prp.db
+      - PRP_TOKEN_SECRET=${PRP_TOKEN_SECRET:-replace-this-shared-prp-token-secret-32chars}
+      - PRP_TOKEN_ISSUER=flyprint-sso-demo
+      - PRP_TOKEN_AUDIENCE=flyprint-prp-demo
+      - PRP_SITE_PORTAL_CODE=${SITE_PORTAL_CODE:-official}
+      - PRP_ALLOWED_UPLOAD_ORIGINS=${SITE_PORTAL_PUBLIC_BASE_URL:-http://localhost:8082}
+      - PRP_PUBLIC_BASE_URL=${PRP_PUBLIC_BASE_URL:-http://localhost:8083}
+      - PRP_MAX_FILE_SIZE_BYTES=${PRP_MAX_FILE_SIZE_BYTES:-52428800}
+      - PRP_PORT=8080
+    ports:
+      - "${PRP_DEMO_PORT:-8083}:8080"
+    volumes:
+      - prp_demo_data:/data
     networks:
       - fly-print-network
     healthcheck:
@@ -202,6 +240,9 @@ services:
       - SITE_PORTAL_IDENTITY_CLIENT_SECRET=${SITE_PORTAL_IDENTITY_CLIENT_SECRET:-change-this-identity-client-secret-32chars}
       - SITE_PORTAL_IDENTITY_CALLBACK_URL=${SITE_PORTAL_PUBLIC_BASE_URL:-http://localhost:8082}/auth/callback
       - SITE_PORTAL_PRP_BASE_URL=${PRP_PUBLIC_BASE_URL:-http://localhost:8083}
+      - SITE_PORTAL_UPLOAD_ENABLED=true
+      - SITE_PORTAL_PRP_API_BASE_URL=http://prp-demo:8080
+      - SITE_PORTAL_USER_SESSION_TTL=${SITE_PORTAL_USER_SESSION_TTL:-1h}
       - SITE_PORTAL_COOKIE_SECURE=${COOKIE_SECURE:-false}
       - SITE_PORTAL_PORT=8080
     ports:
@@ -210,6 +251,8 @@ services:
       api:
         condition: service_started
       sso-login-demo:
+        condition: service_healthy
+      prp-demo:
         condition: service_healthy
     networks:
       - fly-print-network
@@ -303,6 +346,7 @@ volumes:
   redis_data:
   integration_demo_data:
   sso_login_demo_data:
+  prp_demo_data:
 
 networks:
   fly-print-network:
