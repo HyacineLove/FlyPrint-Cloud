@@ -29,6 +29,7 @@ describe('PublicUpload', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    mockedApiService.getToken.mockResolvedValue('test-user-token');
     jest.spyOn(message, 'open').mockImplementation(() => ({}) as any);
   });
 

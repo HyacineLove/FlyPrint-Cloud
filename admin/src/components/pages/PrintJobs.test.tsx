@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import PrintJobs from './PrintJobs';
 
 const response = (data: unknown) => ({ ok: true, status: 200, json: async () => ({ code: 200, data }) }) as Response;
+const rawResponse = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as Response;
 
 describe('PrintJobs user navigation', () => {
   beforeAll(() => {
@@ -18,7 +19,7 @@ describe('PrintJobs user navigation', () => {
     const fetchMock = jest.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
-      return response({ jobs: [{ id: 'job-1', name: 'document.pdf', status: 'completed', created_at: '2026-07-27T00:00:00Z', user_email: 'alice@example.com', user_name: 'Alice' }], pagination: { total: 1 } });
+      return rawResponse({ jobs: [{ id: 'job-1', name: 'document.pdf', status: 'completed', created_at: '2026-07-27T00:00:00Z', user_email: 'alice@example.com', user_name: 'Alice' }], pagination: { total: 1 } });
     });
     global.fetch = fetchMock as jest.Mock;
 
