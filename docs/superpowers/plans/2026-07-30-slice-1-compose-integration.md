@@ -28,7 +28,7 @@
 - Consumes: the existing `api`, PostgreSQL, Redis, MinIO, and nginx services.
 - Produces: Compose services `sso-login-demo` and `site-portal`, plus Cloud `site_portal_bootstrap` environment.
 
-- [ ] **Step 1: Verify the current Compose lacks the Slice 1 services**
+- [x] **Step 1: Verify the current Compose lacks the Slice 1 services**
 
 Run:
 
@@ -38,15 +38,15 @@ docker compose config --services
 
 Expected: output does not contain `sso-login-demo` or `site-portal`.
 
-- [ ] **Step 2: Add the SSO Login Demo service**
+- [x] **Step 2: Add the SSO Login Demo service**
 
 Add a service built from `./sso-login-demo`, publish `${SSO_DEMO_PORT:-8081}:8080`, mount `sso_login_demo_data:/data`, configure the data file, initial operator, client secret, redirect allowlist, and `/health` healthcheck.
 
-- [ ] **Step 3: Add the Site Portal service**
+- [x] **Step 3: Add the Site Portal service**
 
 Add a service built from `./site-portal`, publish `${SITE_PORTAL_PORT:-8082}:8080`, call Cloud through `http://api:8080`, call the identity API through `http://sso-login-demo:8080`, use external browser/callback/claim URLs from `.env`, and wait for `api` plus healthy `sso-login-demo`.
 
-- [ ] **Step 4: Bootstrap the Site Portal in Cloud**
+- [x] **Step 4: Bootstrap the Site Portal in Cloud**
 
 Add these `api.environment` values:
 
@@ -58,11 +58,11 @@ Add these `api.environment` values:
 - FLY_PRINT_SITE_PORTAL_BOOTSTRAP_API_TOKEN=${SITE_PORTAL_API_TOKEN:-change-this-site-portal-token-32chars}
 ```
 
-- [ ] **Step 5: Add non-secret template variables and the SSO data volume**
+- [x] **Step 5: Add non-secret template variables and the SSO data volume**
 
 Document `SITE_PORTAL_PUBLIC_BASE_URL`, `SSO_DEMO_PUBLIC_BASE_URL`, ports, operator username/password, Site Portal API token, identity client secret, and add `sso_login_demo_data`.
 
-- [ ] **Step 6: Verify the rendered Compose**
+- [x] **Step 6: Verify the rendered Compose**
 
 Run:
 
@@ -73,7 +73,7 @@ docker compose config --services
 
 Expected: exit zero; services include `sso-login-demo` and `site-portal`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```powershell
 git add docker-compose.yml .env.example
@@ -91,11 +91,11 @@ git commit -m "feat: compose slice one identity services"
 - Consumes: the Compose services from Task 1 and the Edge feature worktree.
 - Produces: one operator-facing startup and verification sequence.
 
-- [ ] **Step 1: Add the exact LAN configuration rule**
+- [x] **Step 1: Add the exact LAN configuration rule**
 
 Document that `EXTERNAL_API_URL`, `SITE_PORTAL_PUBLIC_BASE_URL`, and `SSO_DEMO_PUBLIC_BASE_URL` must use addresses reachable by the phone and Edge; `localhost` is valid only for a same-host browser.
 
-- [ ] **Step 2: Add the manual verification sequence**
+- [x] **Step 2: Add the manual verification sequence**
 
 Document:
 
@@ -108,7 +108,7 @@ Document:
 7. repeat login and verify the Cloud user is reused
 8. disable the user and verify login is rejected.
 
-- [ ] **Step 3: Run full component verification**
+- [x] **Step 3: Run full component verification**
 
 Run:
 
@@ -119,7 +119,7 @@ go test ./...
 
 Run the Go tests from `api`, `site-portal`, and `sso-login-demo`; run the full Edge unittest suite from the Edge worktree.
 
-- [ ] **Step 4: Build and start Compose**
+- [x] **Step 4: Build and start Compose**
 
 Run:
 
@@ -130,7 +130,7 @@ docker compose ps
 
 Expected: `api`, `sso-login-demo`, `site-portal`, and nginx are running; healthchecked services become healthy.
 
-- [ ] **Step 5: Check health and logs**
+- [x] **Step 5: Check health and logs**
 
 Run:
 
@@ -143,11 +143,11 @@ docker compose logs --tail 100 api sso-login-demo site-portal
 
 Expected: all health requests return 200 and logs contain no configuration or startup errors.
 
-- [ ] **Step 6: Scan the complete branch diff**
+- [x] **Step 6: Scan the complete branch diff**
 
 Inspect `main...HEAD` for real IP addresses, passwords, API tokens, cookies, and user data. Only loopback addresses, `example.test`, placeholders, and test fixtures are permitted.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```powershell
 git add docs/部署与验证.md docs/agent/operations-and-verification.md docs/superpowers/plans/2026-07-30-slice-1-compose-integration.md

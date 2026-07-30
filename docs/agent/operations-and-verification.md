@@ -41,7 +41,7 @@ OAuth2：`api/internal/middleware/oauth2.go`；多 scope = AND；`admin` 拥有�
 Copy-Item .env.example .env   # 必须改密钥后再起
 docker compose up --build -d
 docker compose ps
-docker compose logs -f api nginx
+docker compose logs -f api nginx sso-login-demo site-portal
 # docker compose down     # 保留数据；禁止 down -v
 
 Set-Location api; go run ./cmd/server; go test ./...
@@ -59,5 +59,15 @@ python api/tests/cloud_api_perf.py
 
 - Provider `entry_url` / `callback_base_url` 与 `file.url` 支持 **http** 与 **https**（禁止 userinfo；正式对接推荐 https；不支持自签）。
 - Edge `cloud.base_url` 同样可为 http(s)；Edge 侧自动映射 ws/wss。局域网演示常用 `http://<LAN-IP>:8012`。
+- 切片一联调时，`EXTERNAL_API_URL`、`SITE_PORTAL_PUBLIC_BASE_URL` 与 `SSO_DEMO_PUBLIC_BASE_URL` 必须分别设置为手机和 Edge 可访问的 `8012`、`8082`、`8081` 地址；容器间仍使用 Compose 服务名。
+
+## Site Portal 身份联调检查
+
+1. `docker compose up --build -d` 后确认 `api`、`sso-login-demo`、`site-portal` 和 `nginx` 正常。
+2. 检查 `/api/v1/health`、SSO `:8081/health`、Site Portal `:8082/health`。
+3. 从 Site Portal `/ops` 创建启用用户，确认 Cloud 尚无外部身份映射。
+4. Edge 指向 `EXTERNAL_API_URL`，扫码并完成登录，确认首次生成映射且 Edge 只展示公共身份。
+5. 新会话再次登录，确认复用同一 Cloud 用户；禁用用户后确认登录被拒绝。
+6. 检查 Cloud 响应、数据库与日志不含用户密码、登录 Cookie 或 PRP 访问凭证。
 
 发布前最少：健康、登录、扫码/上传、预览、打印、状态回传、Edge 重连、重复消息/文件。与源码冲突时以源码为准并回写本文。
