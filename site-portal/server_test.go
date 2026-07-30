@@ -31,8 +31,15 @@ func (f *fakeCloudBoundary) completeLogin(input loginCompletion) (string, error)
 }
 
 type fakeIdentityBoundary struct {
-	result identityResult
-	err    error
+	result         identityResult
+	err            error
+	opsResponse    []byte
+	opsStatus      int
+	opsErr         error
+	opsMethod      string
+	opsPath        string
+	opsToken       string
+	opsRequestBody []byte
 }
 
 func (f *fakeIdentityBoundary) exchangeCode(_ string) (identityResult, error) {
@@ -43,8 +50,12 @@ func (f *fakeIdentityBoundary) opsLogin(_, _ string) (identityOpsSession, error)
 	return identityOpsSession{}, errors.New("not used")
 }
 
-func (f *fakeIdentityBoundary) opsRequest(_, _, _ string, _ []byte) ([]byte, int, error) {
-	return nil, 0, errors.New("not used")
+func (f *fakeIdentityBoundary) opsRequest(method, path, token string, body []byte) ([]byte, int, error) {
+	f.opsMethod = method
+	f.opsPath = path
+	f.opsToken = token
+	f.opsRequestBody = append([]byte(nil), body...)
+	return f.opsResponse, f.opsStatus, f.opsErr
 }
 
 func testPortalConfig() configuration {
@@ -152,5 +163,33 @@ func TestEntryRejectsTerminalContextThatCloudDoesNotValidate(t *testing.T) {
 	}
 	if server.loginStates.count() != 0 {
 		t.Fatalf("invalid entry created login state: count=%d", server.loginStates.count())
+	}
+}
+
+func TestOpsDeleteUserProxiesToIdentityService(t *testing.T) {
+	identity := &fakeIdentityBoundary{
+		opsResponse: []byte(`{"success":true}`),
+		opsStatus:   http.StatusOK,
+	}
+	server := newPortalServer(testPortalConfig(), &fakeCloudBoundary{}, identity)
+	localToken := server.opsSessions.create(localOpsSession{
+		IdentityToken: "identity-ops-token",
+		ExpiresAt:     time.Now().Add(time.Hour),
+	})
+	request := httptest.NewRequest(http.MethodDelete, "/api/ops/users/user-1", nil)
+	request.AddCookie(&http.Cookie{Name: opsCookieName, Value: localToken})
+	recorder := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != `{"success":true}` {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
+	}
+	if identity.opsMethod != http.MethodDelete ||
+		identity.opsPath != "/api/ops/users/user-1" ||
+		identity.opsToken != "identity-ops-token" ||
+		len(identity.opsRequestBody) != 0 {
+		t.Fatalf("unexpected identity request: method=%q path=%q token=%q body=%q",
+			identity.opsMethod, identity.opsPath, identity.opsToken, identity.opsRequestBody)
 	}
 }

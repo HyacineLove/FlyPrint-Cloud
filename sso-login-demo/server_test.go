@@ -78,36 +78,6 @@ func TestPublicRegistrationRouteDoesNotExist(t *testing.T) {
 	}
 }
 
-func TestDisabledUserCannotLogin(t *testing.T) {
-	server, err := newServer(testIdentityConfig(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	created, err := server.store.createUser(createUserInput{
-		Username: "teacher", DisplayName: "张老师", Password: "TeacherPass123!",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := server.store.setUserEnabled(created.ID, false); err != nil {
-		t.Fatal(err)
-	}
-
-	form := url.Values{
-		"username":     {"teacher"},
-		"password":     {"TeacherPass123!"},
-		"redirect_uri": {"https://portal.example.test/auth/callback"},
-		"state":        {"state-1"},
-	}
-	request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
-	}
-}
-
 func TestAuthorizationCodeCanBeExchangedOnlyOnce(t *testing.T) {
 	server, err := newServer(testIdentityConfig(t))
 	if err != nil {
@@ -172,5 +142,64 @@ func TestOpsCreateAndResetResponsesNeverContainPasswordOrHash(t *testing.T) {
 				t.Fatalf("sensitive value %q leaked in %s", forbidden, raw)
 			}
 		}
+	}
+}
+
+func TestOpsDeleteRemovesUserAndPreventsLogin(t *testing.T) {
+	server, err := newServer(testIdentityConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := postIdentityJSON(t, server.Handler(), "/api/ops/login", map[string]string{
+		"username": "ops", "password": "OperatorPass123!",
+	}, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("ops login status=%d body=%s", login.Code, login.Body)
+	}
+	var loginResponse map[string]string
+	if err := json.Unmarshal(login.Body.Bytes(), &loginResponse); err != nil {
+		t.Fatal(err)
+	}
+
+	create := postIdentityJSON(t, server.Handler(), "/api/ops/users", map[string]string{
+		"username": "teacher", "display_name": "张老师", "password": "TeacherPass123!",
+	}, loginResponse["session_token"])
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", create.Code, create.Body)
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	user := created["user"].(map[string]any)
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/ops/users/"+user["id"].(string), nil)
+	deleteRequest.Header.Set("Authorization", "Bearer "+loginResponse["session_token"])
+	deleted := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleted, deleteRequest)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body)
+	}
+	lower := bytes.ToLower(deleted.Body.Bytes())
+	for _, forbidden := range [][]byte{
+		[]byte("password"), []byte("hash"), []byte("token"), []byte("TeacherPass123!"),
+	} {
+		if bytes.Contains(lower, bytes.ToLower(forbidden)) {
+			t.Fatalf("sensitive value %q leaked in %s", forbidden, deleted.Body.Bytes())
+		}
+	}
+
+	form := url.Values{
+		"username":     {"teacher"},
+		"password":     {"TeacherPass123!"},
+		"redirect_uri": {"https://portal.example.test/auth/callback"},
+		"state":        {"state-1"},
+	}
+	loginRequest := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	loginRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	userLogin := httptest.NewRecorder()
+	server.Handler().ServeHTTP(userLogin, loginRequest)
+	if userLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted user login status=%d body=%s", userLogin.Code, userLogin.Body)
 	}
 }

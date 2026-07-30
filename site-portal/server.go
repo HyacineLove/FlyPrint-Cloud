@@ -92,7 +92,7 @@ func (s *portalServer) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ops/logout", s.opsLogout)
 	mux.HandleFunc("GET /api/ops/users", s.opsUsers)
 	mux.HandleFunc("POST /api/ops/users", s.opsUsers)
-	mux.HandleFunc("PATCH /api/ops/users/{id}/enabled", s.opsUserEnabled)
+	mux.HandleFunc("DELETE /api/ops/users/{id}", s.opsDeleteUser)
 	mux.HandleFunc("POST /api/ops/users/{id}/reset-password", s.opsResetPassword)
 	return portalSecurityHeaders(mux)
 }
@@ -286,8 +286,8 @@ func (s *portalServer) opsUsers(w http.ResponseWriter, r *http.Request) {
 	s.proxyOps(w, r, path)
 }
 
-func (s *portalServer) opsUserEnabled(w http.ResponseWriter, r *http.Request) {
-	s.proxyOps(w, r, "/api/ops/users/"+url.PathEscape(r.PathValue("id"))+"/enabled")
+func (s *portalServer) opsDeleteUser(w http.ResponseWriter, r *http.Request) {
+	s.proxyOps(w, r, "/api/ops/users/"+url.PathEscape(r.PathValue("id")))
 }
 
 func (s *portalServer) opsResetPassword(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +351,7 @@ const opsPageBody = `<h1>官方用户管理</h1>
 <script>
 const $=id=>document.getElementById(id),msg=$('message'),login=$('login'),manager=$('manager');
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const text=await r.text();let data={};try{data=text?JSON.parse(text):{}}catch{}if(!r.ok)throw new Error(data.message||data.error||'操作失败');return data}
-async function load(){const data=await api('/api/ops/users?search='+encodeURIComponent($('search').value));$('users').innerHTML='';for(const u of data.users||[]){const box=document.createElement('div');box.className='user';box.innerHTML='<strong></strong><p class="muted"></p><button class="toggle"></button><button class="reset">重置密码</button>';box.querySelector('strong').textContent=u.display_name+' ('+u.username+')';box.querySelector('p').textContent=u.enabled?'已启用':'已禁用';const toggle=box.querySelector('.toggle');toggle.textContent=u.enabled?'禁用':'启用';toggle.onclick=async()=>{await api('/api/ops/users/'+encodeURIComponent(u.id)+'/enabled',{method:'PATCH',body:JSON.stringify({enabled:!u.enabled})});await load()};box.querySelector('.reset').onclick=async()=>{const p=prompt('输入新密码（至少 10 位）');if(p){await api('/api/ops/users/'+encodeURIComponent(u.id)+'/reset-password',{method:'POST',body:JSON.stringify({new_password:p})});msg.textContent='密码已重置'}};$('users').appendChild(box)}}
+async function load(){const data=await api('/api/ops/users?search='+encodeURIComponent($('search').value));$('users').innerHTML='';for(const u of data.users||[]){const box=document.createElement('div');box.className='user';box.innerHTML='<strong></strong><p class="muted"></p><button class="delete">删除账户</button><button class="reset">重置密码</button>';box.querySelector('strong').textContent=u.display_name;box.querySelector('p').textContent='账号：'+u.username;box.querySelector('.delete').onclick=async()=>{if(confirm('确认删除账户 '+u.username+'？此操作不可恢复。')){await api('/api/ops/users/'+encodeURIComponent(u.id),{method:'DELETE'});msg.textContent='账户已删除';await load()}};box.querySelector('.reset').onclick=async()=>{const p=prompt('输入新密码（至少 10 位）');if(p){await api('/api/ops/users/'+encodeURIComponent(u.id)+'/reset-password',{method:'POST',body:JSON.stringify({new_password:p})});msg.textContent='密码已重置'}};$('users').appendChild(box)}}
 $('ops-login').onclick=async()=>{try{await api('/api/ops/login',{method:'POST',body:JSON.stringify({username:$('ops-user').value,password:$('ops-pass').value})});$('ops-pass').value='';login.classList.add('hidden');manager.classList.remove('hidden');await load()}catch(e){msg.textContent=e.message}};
 $('refresh').onclick=()=>load().catch(e=>msg.textContent=e.message);
 $('create').onclick=async()=>{try{await api('/api/ops/users',{method:'POST',body:JSON.stringify({username:$('new-user').value,display_name:$('new-name').value,password:$('new-pass').value})});$('new-pass').value='';await load()}catch(e){msg.textContent=e.message}};

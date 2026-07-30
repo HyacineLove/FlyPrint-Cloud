@@ -107,10 +107,10 @@ Site Portal `/ops` 通过后端代理身份服务的以下接口：
 - `POST /api/ops/login`
 - `GET /api/ops/users?search=`
 - `POST /api/ops/users`
-- `PATCH /api/ops/users/{id}/enabled`
+- `DELETE /api/ops/users/{id}`
 - `POST /api/ops/users/{id}/reset-password`
 
-身份服务不提供公开注册入口。官方账号创建不会同步到 Cloud；只有首次成功完成上述登录链路时才产生 Cloud 用户映射。
+身份服务不提供公开注册入口，也不提供账号编辑或启停能力。官方账号创建不会同步到 Cloud；只有首次成功完成上述登录链路时才产生 Cloud 用户映射。删除账号不会级联删除 Cloud 已有映射。
 
 ## 组件配置
 

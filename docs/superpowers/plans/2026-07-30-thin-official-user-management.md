@@ -27,23 +27,23 @@
 - Consumes: authenticated operator session and user ID path parameter.
 - Produces: `DELETE /api/ops/users/{id}` returning `{"success":true}` or `404 {"error":"user_not_found"}`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a test that creates a real user, deletes it through the HTTP handler, verifies the delete response contains no sensitive fields, and verifies a later authorization attempt for that account returns unauthorized.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
-Run: `go test ./sso-login-demo -run TestOpsDeleteRemovesUserAndPreventsLogin -v`
+Run from `sso-login-demo`: `go test . -run TestOpsDeleteRemovesUserAndPreventsLogin -v`
 
 Expected: FAIL because `DELETE /api/ops/users/{id}` is not registered.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Add `deleteUser(id string) error` to `identityStore`, register `DELETE /api/ops/users/{id}`, and implement an operator-authenticated handler. Remove the enable/disable route, handler, store method, and `Enabled` persistence/public fields. Newly created users remain immediately usable.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
-Run: `go test ./sso-login-demo -v`
+Run from `sso-login-demo`: `go test . -v`
 
 Expected: PASS.
 
@@ -57,23 +57,23 @@ Expected: PASS.
 - Consumes: SSO Login Demo delete endpoint from Task 1.
 - Produces: proxied `DELETE /api/ops/users/{id}` and UI controls for delete and reset password only.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a portal handler test whose real portal router receives `DELETE /api/ops/users/user-1` and whose identity-boundary fake records the forwarded method and path. Assert the returned status and body.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
-Run: `go test ./site-portal -run TestOpsDeleteUserProxiesToIdentityService -v`
+Run from `site-portal`: `go test . -run TestOpsDeleteUserProxiesToIdentityService -v`
 
 Expected: FAIL because the portal delete route is not registered.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Replace the enable/disable proxy route with `DELETE /api/ops/users/{id}`. Update the user card to show username and display name with only “删除账户” and “重置密码”; require browser confirmation before deletion and refresh the list after success.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
-Run: `go test ./site-portal -v`
+Run from `site-portal`: `go test . -v`
 
 Expected: PASS.
 
@@ -86,26 +86,26 @@ Expected: PASS.
 - Consumes: Tasks 1 and 2.
 - Produces: tested, reviewable Cloud repository commit.
 
-- [ ] **Step 1: Run all Go tests**
+- [x] **Step 1: Run all Go tests**
 
-Run: `go test ./...`
+Run `go test ./...` separately from `api`, `integration-demo`, `sso-login-demo`, and `site-portal`.
 
 Expected: PASS.
 
-- [ ] **Step 2: Rebuild Demo services**
+- [x] **Step 2: Rebuild Demo services**
 
-Run: `docker compose up -d --build sso-login-demo site-portal`
+Run: `docker compose -p fly-print-cloud up -d --build sso-login-demo site-portal`
 
 Expected: both containers become healthy.
 
-- [ ] **Step 3: Verify live behavior**
+- [x] **Step 3: Verify live behavior**
 
-Create a temporary account from Site Portal, log in once, delete it, and confirm the same credentials no longer authorize. Confirm the Edge identity-ready page and reset-to-QR action still work.
+Create a temporary account through Site Portal, confirm SSO accepts it, delete it, and confirm the same credentials no longer authorize. Confirm the Site Portal page exposes only delete and password-reset controls. Use the completed manual flow as evidence for the Edge identity-ready page, then confirm an Edge restart returns to a usable QR.
 
-- [ ] **Step 4: Review**
+- [x] **Step 4: Review**
 
 Run `git diff --check`, inspect the complete branch diff, and scan changed files for IP addresses, credentials, tokens, private keys, and environment-specific paths.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit the tested Cloud changes and the pending Edge identity-ready changes as separate repository commits. Do not push in this step.

@@ -145,7 +145,7 @@ func (s *server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ops/login", s.opsLogin)
 	mux.HandleFunc("GET /api/ops/users", s.listUsers)
 	mux.HandleFunc("POST /api/ops/users", s.createUser)
-	mux.HandleFunc("PATCH /api/ops/users/{id}/enabled", s.setUserEnabled)
+	mux.HandleFunc("DELETE /api/ops/users/{id}", s.deleteUser)
 	mux.HandleFunc("POST /api/ops/users/{id}/reset-password", s.resetUserPassword)
 	return identitySecurityHeaders(mux)
 }
@@ -297,23 +297,16 @@ func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
 	writeIdentityJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 
-func (s *server) setUserEnabled(w http.ResponseWriter, r *http.Request) {
+func (s *server) deleteUser(w http.ResponseWriter, r *http.Request) {
 	if !s.requireOps(w, r) {
 		return
 	}
-	var input struct {
-		Enabled *bool `json:"enabled"`
-	}
-	if err := decodeIdentityJSON(r, &input); err != nil || input.Enabled == nil {
-		writeIdentityJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
-		return
-	}
-	user, err := s.store.setUserEnabled(r.PathValue("id"), *input.Enabled)
+	err := s.store.deleteUser(r.PathValue("id"))
 	if err != nil {
 		writeIdentityJSON(w, http.StatusNotFound, map[string]string{"error": "user_not_found"})
 		return
 	}
-	writeIdentityJSON(w, http.StatusOK, map[string]any{"user": user})
+	writeIdentityJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (s *server) resetUserPassword(w http.ResponseWriter, r *http.Request) {

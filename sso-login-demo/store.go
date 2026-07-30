@@ -31,7 +31,6 @@ type userRecord struct {
 	Username     string    `json:"username"`
 	DisplayName  string    `json:"display_name"`
 	PasswordHash string    `json:"password_hash"`
-	Enabled      bool      `json:"enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -40,7 +39,6 @@ type publicUser struct {
 	ID          string    `json:"id"`
 	Username    string    `json:"username"`
 	DisplayName string    `json:"display_name"`
-	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -142,7 +140,7 @@ func validatePassword(password string) error {
 func toPublicUser(user *userRecord) publicUser {
 	return publicUser{
 		ID: user.ID, Username: user.Username, DisplayName: user.DisplayName,
-		Enabled: user.Enabled, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt,
+		CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt,
 	}
 }
 
@@ -165,7 +163,7 @@ func (s *identityStore) authenticateUser(username, password string) (*publicUser
 		}
 	}
 	s.mu.RUnlock()
-	if candidate == nil || !candidate.Enabled ||
+	if candidate == nil ||
 		bcrypt.CompareHashAndPassword([]byte(candidate.PasswordHash), []byte(password)) != nil {
 		return nil, false
 	}
@@ -200,7 +198,7 @@ func (s *identityStore) createUser(input createUserInput) (*publicUser, error) {
 	now := time.Now().UTC()
 	user := &userRecord{
 		ID: randomOpaqueToken(16), Username: input.Username, DisplayName: input.DisplayName,
-		PasswordHash: string(hash), Enabled: true, CreatedAt: now, UpdatedAt: now,
+		PasswordHash: string(hash), CreatedAt: now, UpdatedAt: now,
 	}
 	s.state.Users[user.ID] = user
 	if err := s.saveLocked(); err != nil {
@@ -229,22 +227,19 @@ func (s *identityStore) listUsers(search string) []publicUser {
 	return users
 }
 
-func (s *identityStore) setUserEnabled(id string, enabled bool) (*publicUser, error) {
+func (s *identityStore) deleteUser(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	user := s.state.Users[id]
 	if user == nil {
-		return nil, errUserNotFound
+		return errUserNotFound
 	}
-	previous := *user
-	user.Enabled = enabled
-	user.UpdatedAt = time.Now().UTC()
+	delete(s.state.Users, id)
 	if err := s.saveLocked(); err != nil {
-		*user = previous
-		return nil, err
+		s.state.Users[id] = user
+		return err
 	}
-	public := toPublicUser(user)
-	return &public, nil
+	return nil
 }
 
 func (s *identityStore) resetPassword(id, newPassword string) error {

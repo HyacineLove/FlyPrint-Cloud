@@ -65,9 +65,9 @@ python api/tests/cloud_api_perf.py
 
 1. `docker compose up --build -d` 后确认 `api`、`sso-login-demo`、`site-portal` 和 `nginx` 正常。
 2. 检查 `/api/v1/health`、SSO `:8081/health`、Site Portal `:8082/health`。
-3. 从 Site Portal `/ops` 创建启用用户，确认 Cloud 尚无外部身份映射。
+3. 从 Site Portal `/ops` 创建用户，确认 Cloud 尚无外部身份映射。
 4. Edge 指向 `EXTERNAL_API_URL`，扫码并完成登录，确认首次生成映射且 Edge 只展示公共身份。
-5. 新会话再次登录，确认复用同一 Cloud 用户；禁用用户后确认登录被拒绝。
+5. 新会话再次登录，确认复用同一 Cloud 用户；删除用户后确认登录被拒绝，且 Cloud 历史映射保留。
 6. 检查 Cloud 响应、数据库与日志不含用户密码、登录 Cookie 或 PRP 访问凭证。
 
 发布前最少：健康、登录、扫码/上传、预览、打印、状态回传、Edge 重连、重复消息/文件。与源码冲突时以源码为准并回写本文。
