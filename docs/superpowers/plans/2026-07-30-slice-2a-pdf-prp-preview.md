@@ -437,7 +437,7 @@ git commit -m "feat: compose official PRP demo"
 - Produces: `PRPClient.download_file(access_context, file_id, destination) -> dict`.
 - `access_context` is returned only by `PortalSessionManager.get_access_context(session_id)`.
 
-- [ ] **Step 1: Write failing client tests**
+- [x] **Step 1: Write failing client tests**
 
 Use a real local HTTP test server. Verify:
 
@@ -451,7 +451,7 @@ def test_base_url_rejects_userinfo_query_and_fragment(self): ...
 
 Expected values must use literal JSON and literal SHA-256 fixtures.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 py -m unittest tests.test_prp_client -v
@@ -459,17 +459,17 @@ py -m unittest tests.test_prp_client -v
 
 Expected: import failure because `prp_client.py` does not exist.
 
-- [ ] **Step 3: Implement client**
+- [x] **Step 3: Implement client**
 
 Use a bounded `requests.Session`, explicit connect/read timeouts, `stream=True`, fixed client-constructed paths, and `Authorization: Bearer`. Write to a sibling `.part`, enforce Edge's configured maximum while streaming, compare `Content-Length` and `X-Content-SHA256`, then `os.replace` into the destination.
 
-- [ ] **Step 4: Run GREEN**
+- [x] **Step 4: Run GREEN**
 
 ```powershell
 py -m unittest tests.test_prp_client -v
 ```
 
-- [ ] **Step 5: Commit Edge repository**
+- [x] **Step 5: Commit Edge repository**
 
 ```powershell
 git add prp_client.py edge_limits.py tests/test_prp_client.py
@@ -497,7 +497,7 @@ git commit -m "feat: add strict PRP client"
 - Produces: `POST /api/prp/files/{file_id}/select`.
 - Existing `POST /api/preview` accepts a PRP-bound file without a Cloud `file_url`.
 
-- [ ] **Step 1: Write failing selection-manager tests**
+- [x] **Step 1: Write failing selection-manager tests**
 
 Cover:
 
@@ -507,7 +507,7 @@ def test_clear_session_deletes_source_and_empty_directory(self): ...
 def test_public_snapshot_never_exposes_local_path_or_access_token(self): ...
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 py -m unittest tests.test_prp_file_selection -v
@@ -515,7 +515,7 @@ py -m unittest tests.test_prp_file_selection -v
 
 Expected: import failure because the manager is absent.
 
-- [ ] **Step 3: Implement session-bound selection store**
+- [x] **Step 3: Implement session-bound selection store**
 
 Store source files under the existing portable temp root in a per-session directory. Keep local paths only in `PRPFileSelectionManager`; interactive and public snapshots store:
 
@@ -528,7 +528,7 @@ content_hash
 size
 ```
 
-- [ ] **Step 4: Write failing endpoint tests**
+- [x] **Step 4: Write failing endpoint tests**
 
 With real `PortalSessionManager` and faked network boundary below `PRPClient`, verify:
 
@@ -540,7 +540,7 @@ def test_preview_uses_bound_local_source_without_cloud_download(self): ...
 def test_print_rejects_prp_source_before_cloud_or_ipp(self): ...
 ```
 
-- [ ] **Step 5: Implement thin endpoints and preview source selection**
+- [x] **Step 5: Implement thin endpoints and preview source selection**
 
 `GET /api/prp/files` requires `session_id`, obtains the private access context, and returns only public metadata.
 
@@ -555,13 +555,13 @@ This is an explicit source type branch, not a retry or fallback. After canonical
 
 In `/api/print`, reject `source_origin=prp` before Cloud submission or IPP. Return `print_not_available_in_slice` so the PDF checkpoint cannot accidentally print.
 
-- [ ] **Step 6: Run GREEN and Edge regression**
+- [x] **Step 6: Run GREEN and Edge regression**
 
 ```powershell
 py -m unittest tests.test_prp_file_selection tests.test_interactive_session tests.test_user_session_snapshot_api tests.test_user_preview_print_api -v
 ```
 
-- [ ] **Step 7: Commit Edge repository**
+- [x] **Step 7: Commit Edge repository**
 
 ```powershell
 git add prp_file_selection.py interactive_session.py portal_session.py main.py tests
@@ -588,7 +588,7 @@ git commit -m "feat: bind PRP files to local preview"
 - Produces: files view with greeting, pagination, loading, empty, error, and selection states.
 - Selecting one item calls the Edge select endpoint and routes to existing preview.
 
-- [ ] **Step 1: Write failing pure-state tests**
+- [x] **Step 1: Write failing pure-state tests**
 
 ```javascript
 test("normalizes a valid literal PRP page", () => {
@@ -605,7 +605,7 @@ test("normalizes a valid literal PRP page", () => {
 
 Also reject credentials, malformed hashes, invalid pagination, and items without IDs.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```powershell
 node --experimental-default-type=module --test tests/js/prp-files.test.mjs
@@ -613,11 +613,11 @@ node --experimental-default-type=module --test tests/js/prp-files.test.mjs
 
 Expected: module-not-found failure.
 
-- [ ] **Step 3: Implement state and view**
+- [x] **Step 3: Implement state and view**
 
 Register the `files` route. After `portal_session_ready` and an `identity_ready` snapshot, route to files. The view fetches page 1, shows the public display name, and exposes one select action per file. Do not render raw HTML from file names; use `textContent`.
 
-- [ ] **Step 4: Connect selection to preview**
+- [x] **Step 4: Connect selection to preview**
 
 After a successful select response, set:
 
@@ -631,14 +631,14 @@ session.file = {
 
 Update preview preconditions so PRP files require `source_origin === "prp"` instead of `file_url`. Existing Cloud/integration preview still requires `file_url`. For PRP files, hide or disable the print-confirm action and display “打印将在下一切片开放”.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```powershell
 node --experimental-default-type=module --test tests/js/identity-session.test.mjs tests/js/prp-files.test.mjs
 py -m unittest discover -s tests -p 'test_*.py'
 ```
 
-- [ ] **Step 6: Commit Edge repository**
+- [x] **Step 6: Commit Edge repository**
 
 ```powershell
 git add static/user tests/js
@@ -660,7 +660,7 @@ git commit -m "feat: select PRP files on edge"
 - Consumes: Tasks 1–8.
 - Produces: repeatable PDF integration record and Slice 2 marked in progress.
 
-- [ ] **Step 1: Run complete automated verification**
+- [x] **Step 1: Run complete automated verification**
 
 Cloud modules:
 
@@ -701,7 +701,7 @@ Search Cloud, Site Portal, PRP, and Edge logs for the exact test token marker an
 - Cloud database and upload directories contain no new test file;
 - frontend state-contract tests prove no PRP credential is written to browser session state.
 
-- [ ] **Step 4: Update current documentation**
+- [x] **Step 4: Update current documentation**
 
 Document the exact PRP contract and commands. In the root execution checklist:
 
@@ -710,7 +710,7 @@ Document the exact PRP contract and commands. In the root execution checklist:
 - mark Slice 2 in progress;
 - leave Slice 2 completion unchecked until 2B types and governance pass.
 
-- [ ] **Step 5: Review each repository**
+- [x] **Step 5: Review each repository**
 
 For Cloud and Edge:
 
@@ -723,7 +723,7 @@ git diff 03458ce...HEAD   # Edge
 
 Scan additions for private IPs, secrets, tokens, cookies, credentials, real user data, and environment-specific absolute paths.
 
-- [ ] **Step 6: Commit documentation**
+- [x] **Step 6: Commit documentation**
 
 Cloud:
 
