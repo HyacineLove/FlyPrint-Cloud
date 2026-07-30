@@ -126,7 +126,7 @@ git commit -m "feat: sign demo PRP access tokens"
 - Produces: `GET /health` returning `{"status":"ok"}`.
 - `accessClaims` exposes only `Subject`, `SitePortalCode`, `Scopes`, `ExpiresAt`, and `TokenID`.
 
-- [ ] **Step 1: Write independent verifier tests**
+- [x] **Step 1: Write independent verifier tests**
 
 Use a fixed known HMAC secret and independently constructed literal tokens. Cover:
 
@@ -140,7 +140,7 @@ func TestVerifyPRPTokenRequiresScope(t *testing.T)
 
 The test must not call the SSO signer to build its expected claims.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run from `prp-demo`:
 
@@ -150,7 +150,7 @@ go test . -run TestVerifyPRPToken -v
 
 Expected: compile failure because the verifier is absent.
 
-- [ ] **Step 3: Implement configuration and verifier**
+- [x] **Step 3: Implement configuration and verifier**
 
 Required configuration:
 
@@ -168,17 +168,17 @@ PRP_MAX_FILE_SIZE_BYTES
 
 Reject incomplete URLs, wildcard origins, secrets under 32 characters, non-positive file limits, and database paths outside `PRP_DATA_DIR`. The 2A default file limit is 50 MiB.
 
-- [ ] **Step 4: Implement server skeleton**
+- [x] **Step 4: Implement server skeleton**
 
 Create a `server` with dependency-injected clock and verifier. Add JSON error responses with `Cache-Control: no-store`, security headers, and a health route. Do not add file routes yet.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```powershell
 go test . -v
 ```
 
-- [ ] **Step 6: Commit Cloud repository**
+- [x] **Step 6: Commit Cloud repository**
 
 ```powershell
 git add prp-demo
