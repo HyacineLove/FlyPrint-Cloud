@@ -550,6 +550,10 @@ func (db *DB) InitTables() error {
 		return fmt.Errorf("failed to add deleted_at column to printers: %w", err)
 	}
 
+	if err := db.initSitePortalSchema(); err != nil {
+		return err
+	}
+
 	logger.Info("Database tables initialized successfully")
 	return nil
 }
