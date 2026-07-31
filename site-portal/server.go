@@ -250,11 +250,11 @@ func (s *portalServer) filesPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := `<h1>上传打印文件</h1><p>当前用户：` + template.HTMLEscapeString(session.DisplayName) +
-		`</p><input id="pdf" type="file" accept="application/pdf,.pdf"><button id="upload">上传 PDF</button><p id="result" class="muted">请选择一个 PDF 文件。</p>
+		`</p><input id="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx"><button id="upload">上传文件</button><p id="result" class="muted">请选择 PDF、图片或 DOCX 文件。</p>
 <script>
-const input=document.getElementById('pdf'),button=document.getElementById('upload'),result=document.getElementById('result');
+const input=document.getElementById('file'),button=document.getElementById('upload'),result=document.getElementById('result');
 button.onclick=async()=>{
-  const file=input.files[0];if(!file){result.textContent='请先选择 PDF 文件。';return}
+  const file=input.files[0];if(!file){result.textContent='请先选择文件。';return}
   button.disabled=true;result.textContent='正在申请上传…';
   try{
     const contextResponse=await fetch('/api/files/upload-context',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});

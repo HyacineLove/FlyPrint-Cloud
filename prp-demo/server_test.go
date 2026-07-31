@@ -22,7 +22,11 @@ func testConfiguration(t *testing.T) configuration {
 		AllowedUploadOrigins: []string{"https://portal.example.test"},
 		PublicBaseURL:        "https://prp.example.test",
 		MaxFileSizeBytes:     50 * 1024 * 1024,
+		MaxFilesPerUser:      20,
+		MaxBytesPerUser:      200 * 1024 * 1024,
+		MaxTotalBytes:        1024 * 1024 * 1024,
 		FileTTL:              7 * 24 * time.Hour,
+		CleanupInterval:      5 * time.Minute,
 		UploadContextTTL:     5 * time.Minute,
 	}
 }

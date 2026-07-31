@@ -15,6 +15,10 @@ const defaultMaxFileSizeBytes int64 = 50 * 1024 * 1024
 const (
 	defaultFileTTL          = 7 * 24 * time.Hour
 	defaultUploadContextTTL = 5 * time.Minute
+	defaultCleanupInterval  = 5 * time.Minute
+	defaultMaxFilesPerUser  = 20
+	defaultMaxBytesPerUser  = 200 * 1024 * 1024
+	defaultMaxTotalBytes    = 1024 * 1024 * 1024
 )
 
 type configuration struct {
@@ -27,7 +31,11 @@ type configuration struct {
 	AllowedUploadOrigins []string
 	PublicBaseURL        string
 	MaxFileSizeBytes     int64
+	MaxFilesPerUser      int
+	MaxBytesPerUser      int64
+	MaxTotalBytes        int64
 	FileTTL              time.Duration
+	CleanupInterval      time.Duration
 	UploadContextTTL     time.Duration
 }
 
@@ -40,7 +48,13 @@ func (c configuration) validate() error {
 		strings.TrimSpace(c.SitePortalCode) == "" ||
 		len(c.AllowedUploadOrigins) == 0 ||
 		c.MaxFileSizeBytes <= 0 ||
+		c.MaxFilesPerUser <= 0 ||
+		c.MaxBytesPerUser <= 0 ||
+		c.MaxTotalBytes <= 0 ||
+		c.MaxFileSizeBytes > c.MaxBytesPerUser ||
+		c.MaxFileSizeBytes > c.MaxTotalBytes ||
 		c.FileTTL <= 0 ||
+		c.CleanupInterval <= 0 ||
 		c.UploadContextTTL <= 0 {
 		return fmt.Errorf("PRP Demo configuration is incomplete")
 	}
@@ -91,13 +105,29 @@ func validateOrigin(raw string) error {
 }
 
 func configurationFromEnvironment() (configuration, string, error) {
-	maxFileSize := defaultMaxFileSizeBytes
-	if raw := strings.TrimSpace(os.Getenv("PRP_MAX_FILE_SIZE_BYTES")); raw != "" {
-		parsed, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || parsed <= 0 {
-			return configuration{}, "", fmt.Errorf("PRP_MAX_FILE_SIZE_BYTES is invalid")
-		}
-		maxFileSize = parsed
+	maxFileSize, err := positiveInt64Environment("PRP_MAX_FILE_SIZE_BYTES", defaultMaxFileSizeBytes)
+	if err != nil {
+		return configuration{}, "", err
+	}
+	maxFilesPerUser, err := positiveIntEnvironment("PRP_MAX_FILES_PER_USER", defaultMaxFilesPerUser)
+	if err != nil {
+		return configuration{}, "", err
+	}
+	maxBytesPerUser, err := positiveInt64Environment("PRP_MAX_BYTES_PER_USER", defaultMaxBytesPerUser)
+	if err != nil {
+		return configuration{}, "", err
+	}
+	maxTotalBytes, err := positiveInt64Environment("PRP_MAX_TOTAL_BYTES", defaultMaxTotalBytes)
+	if err != nil {
+		return configuration{}, "", err
+	}
+	fileTTLSeconds, err := positiveInt64Environment("PRP_FILE_TTL_SECONDS", int64(defaultFileTTL/time.Second))
+	if err != nil {
+		return configuration{}, "", err
+	}
+	cleanupIntervalSeconds, err := positiveInt64Environment("PRP_CLEANUP_INTERVAL_SECONDS", int64(defaultCleanupInterval/time.Second))
+	if err != nil {
+		return configuration{}, "", err
 	}
 	config := configuration{
 		DataDir:              strings.TrimSpace(os.Getenv("PRP_DATA_DIR")),
@@ -109,7 +139,11 @@ func configurationFromEnvironment() (configuration, string, error) {
 		AllowedUploadOrigins: splitNonEmpty(os.Getenv("PRP_ALLOWED_UPLOAD_ORIGINS")),
 		PublicBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("PRP_PUBLIC_BASE_URL")), "/"),
 		MaxFileSizeBytes:     maxFileSize,
-		FileTTL:              defaultFileTTL,
+		MaxFilesPerUser:      maxFilesPerUser,
+		MaxBytesPerUser:      maxBytesPerUser,
+		MaxTotalBytes:        maxTotalBytes,
+		FileTTL:              time.Duration(fileTTLSeconds) * time.Second,
+		CleanupInterval:      time.Duration(cleanupIntervalSeconds) * time.Second,
 		UploadContextTTL:     defaultUploadContextTTL,
 	}
 	if err := config.validate(); err != nil {
@@ -124,6 +158,30 @@ func configurationFromEnvironment() (configuration, string, error) {
 		port = parsed
 	}
 	return config, fmt.Sprintf(":%d", port), nil
+}
+
+func positiveIntEnvironment(name string, defaultValue int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s is invalid", name)
+	}
+	return parsed, nil
+}
+
+func positiveInt64Environment(name string, defaultValue int64) (int64, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s is invalid", name)
+	}
+	return parsed, nil
 }
 
 func splitNonEmpty(raw string) []string {

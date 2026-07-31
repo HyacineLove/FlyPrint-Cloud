@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,6 +18,8 @@ type server struct {
 	uploadContexts *uploadContextStore
 	files          *fileStore
 	now            func() time.Time
+	cleanupStop    chan struct{}
+	cleanupDone    chan struct{}
 }
 
 func newServer(config configuration, verifier tokenVerifier) (*server, error) {
@@ -27,17 +30,37 @@ func newServer(config configuration, verifier tokenVerifier) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &server{
+	result := &server{
 		config:         config,
 		verifier:       verifier,
 		uploadContexts: newUploadContextStore(),
 		files:          files,
 		now:            time.Now,
-	}, nil
+		cleanupStop:    make(chan struct{}),
+		cleanupDone:    make(chan struct{}),
+	}
+	go result.runCleanup()
+	return result, nil
 }
 
 func (s *server) close() error {
+	close(s.cleanupStop)
+	<-s.cleanupDone
 	return s.files.close()
+}
+
+func (s *server) runCleanup() {
+	defer close(s.cleanupDone)
+	ticker := time.NewTicker(s.config.CleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = s.files.cleanup(context.Background(), s.now().UTC())
+		case <-s.cleanupStop:
+			return
+		}
+	}
 }
 
 func (s *server) Handler() http.Handler {
@@ -104,7 +127,7 @@ func (s *server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_upload")
 		return
 	}
-	item, err := s.files.uploadPDF(
+	item, err := s.files.uploadFile(
 		r.Context(), context.Subject, part.FileName(), part.Header.Get("Content-Type"), part, s.now().UTC(),
 	)
 	_ = part.Close()
@@ -131,6 +154,10 @@ func (s *server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := s.files.cleanup(r.Context(), s.now().UTC()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	page, pageSize, ok := parsePagination(r)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_pagination")
@@ -147,6 +174,10 @@ func (s *server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	claims, ok := s.authorizePRP(w, r, "files:download")
 	if !ok {
+		return
+	}
+	if err := s.files.cleanup(r.Context(), s.now().UTC()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	stored, file, err := s.files.openDownload(r.Context(), claims.Subject, r.PathValue("id"))
@@ -241,6 +272,8 @@ func (s *server) writeFileError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_file_type")
 	case errors.Is(err, errFileTooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, "file_too_large")
+	case errors.Is(err, errStorageCapacity):
+		writeError(w, http.StatusInsufficientStorage, "storage_capacity_exceeded")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error")
 	}

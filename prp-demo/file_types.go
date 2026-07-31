@@ -9,6 +9,7 @@ var (
 	errUnsupportedFileType = errors.New("unsupported file type")
 	errFileTooLarge        = errors.New("file too large")
 	errFileNotFound        = errors.New("file not found")
+	errStorageCapacity     = errors.New("storage capacity exceeded")
 )
 
 type fileItem struct {
