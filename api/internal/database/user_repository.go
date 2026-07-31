@@ -284,6 +284,11 @@ func (r *UserRepository) DeleteUserWithPrintJobs(userID string) error {
 		return ErrUserHasActivePrintJobs
 	}
 
+	// Site Portal 身份映射从属于 Cloud 用户，删除用户时在同一事务内解除映射。
+	if _, err := tx.Exec(`DELETE FROM external_identities WHERE cloud_user_id = $1`, userID); err != nil {
+		return fmt.Errorf("failed to delete user external identities: %w", err)
+	}
+
 	if _, err := tx.Exec(`
 		DELETE FROM operational_alerts
 		WHERE job_id IN (SELECT id FROM print_jobs WHERE user_id = $1)`, userID); err != nil {
