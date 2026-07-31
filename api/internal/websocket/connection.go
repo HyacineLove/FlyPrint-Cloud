@@ -817,6 +817,8 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 		result, err := c.StatusService.ApplyTerminalJobUpdate(c.Receipts, operations.TerminalJobUpdate{
 			EventID: jobData.EventID, PayloadHash: terminalJobUpdatePayloadHash(jobData), NodeID: c.NodeID,
 			JobID: jobData.JobID, Status: jobData.Status, ErrorCode: jobData.ErrorCode, ErrorMessage: errMsg,
+			ImpressionsCompleted: jobData.ImpressionsCompleted, SheetsCompleted: jobData.SheetsCompleted,
+			QuotaConsumed: jobData.QuotaConsumed,
 		})
 		if err != nil {
 			logger.Error("Failed to persist terminal job update", zap.String("job_id", jobData.JobID), zap.Error(err))
@@ -872,7 +874,12 @@ func terminalJobUpdatePayloadHash(data JobUpdateData) string {
 	if data.ErrorMessage != nil {
 		message = *data.ErrorMessage
 	}
-	plain := strings.Join([]string{data.JobID, data.Status, data.ErrorCode, message, data.TerminalSessionID, data.TerminalTicketHash, data.IntegrationRequestID}, "\n")
+	plain := strings.Join([]string{
+		data.JobID, data.Status, data.ErrorCode, message,
+		fmt.Sprintf("%d", data.ImpressionsCompleted), fmt.Sprintf("%d", data.SheetsCompleted),
+		fmt.Sprintf("%d", data.QuotaConsumed),
+		data.TerminalSessionID, data.TerminalTicketHash, data.IntegrationRequestID,
+	}, "\n")
 	sum := sha256.Sum256([]byte(plain))
 	return fmt.Sprintf("%x", sum[:])
 }

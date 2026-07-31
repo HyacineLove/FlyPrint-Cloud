@@ -131,9 +131,161 @@ func TestApplyTerminalJobUpdatePersistsResultAndReceiptTogether(t *testing.T) {
 	mock.ExpectQuery("SELECT event_id").WithArgs(update.EventID).
 		WillReturnRows(sqlmock.NewRows([]string{"event_id", "node_id", "job_id", "status", "payload_hash"}))
 	mock.ExpectQuery("SELECT j.status").WithArgs(update.JobID).
-		WillReturnRows(sqlmock.NewRows([]string{"status", "error_code", "printer_id", "edge_node_id"}).
-			AddRow("processing", "", "printer-1", update.NodeID))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "error_code", "printer_id", "edge_node_id", "user_id",
+			"quota_reserved", "quota_consumed", "impressions_completed", "sheets_completed", "color_mode",
+			"page_count", "copies", "duplex_mode",
+		}).AddRow("processing", "", "printer-1", update.NodeID, "", 0, nil, nil, nil, "mono", 1, 1, "simplex"))
 	mock.ExpectExec("UPDATE print_jobs").WithArgs(update.JobID, update.Status, update.ErrorCode, update.ErrorMessage).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO edge_job_update_receipts").
+		WithArgs(update.EventID, update.NodeID, update.JobID, update.Status, update.PayloadHash).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	result, err := service.ApplyTerminalJobUpdate(receipts, update)
+	if err != nil {
+		t.Fatalf("ApplyTerminalJobUpdate() error = %v", err)
+	}
+	if !result.Accepted || !result.Changed {
+		t.Fatalf("unexpected terminal result: %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyTerminalJobUpdateSettlesFailedPortalJobAndRefundsUnusedQuota(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	service := &StatusService{db: &database.DB{DB: db}}
+	receipts := database.NewEdgeJobUpdateReceiptRepository(&database.DB{DB: db})
+	update := TerminalJobUpdate{
+		EventID: "event-1", PayloadHash: "hash-1", NodeID: "node-1", JobID: "job-1",
+		Status: "failed", ImpressionsCompleted: 4, SheetsCompleted: 3, QuotaConsumed: 6,
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT event_id").WithArgs(update.EventID).
+		WillReturnRows(sqlmock.NewRows([]string{"event_id", "node_id", "job_id", "status", "payload_hash"}))
+	mock.ExpectQuery("SELECT j.status").WithArgs(update.JobID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "error_code", "printer_id", "edge_node_id", "user_id",
+			"quota_reserved", "quota_consumed", "impressions_completed", "sheets_completed", "color_mode",
+			"page_count", "copies", "duplex_mode",
+		}).AddRow("processing", "", "printer-1", update.NodeID, "user-1", 8, nil, nil, nil, "color", 3, 2, "longedge"))
+	mock.ExpectExec("UPDATE print_jobs").
+		WithArgs(update.JobID, update.Status, update.ErrorCode, update.ErrorMessage).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE print_jobs SET").
+		WithArgs(update.JobID, update.ImpressionsCompleted, update.SheetsCompleted, 6).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("UPDATE users").WithArgs("user-1", 2).
+		WillReturnRows(sqlmock.NewRows([]string{"print_quota_balance"}).AddRow(44))
+	mock.ExpectExec("INSERT INTO print_quota_transactions").
+		WithArgs("user-1", update.JobID, 2, 44).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO edge_job_update_receipts").
+		WithArgs(update.EventID, update.NodeID, update.JobID, update.Status, update.PayloadHash).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	result, err := service.ApplyTerminalJobUpdate(receipts, update)
+	if err != nil {
+		t.Fatalf("ApplyTerminalJobUpdate() error = %v", err)
+	}
+	if !result.Accepted || !result.Changed {
+		t.Fatalf("unexpected terminal result: %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyTerminalJobUpdateKeepsReservationWhenResultIsUnconfirmed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	databaseHandle := &database.DB{DB: db}
+	service := NewStatusService(databaseHandle, database.NewOperationalAlertRepository(databaseHandle))
+	receipts := database.NewEdgeJobUpdateReceiptRepository(databaseHandle)
+	update := TerminalJobUpdate{
+		EventID: "event-1", PayloadHash: "hash-1", NodeID: "node-1", JobID: "job-1",
+		Status: "unconfirmed",
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT event_id").WithArgs(update.EventID).
+		WillReturnRows(sqlmock.NewRows([]string{"event_id", "node_id", "job_id", "status", "payload_hash"}))
+	mock.ExpectQuery("SELECT j.status").WithArgs(update.JobID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "error_code", "printer_id", "edge_node_id", "user_id",
+			"quota_reserved", "quota_consumed", "impressions_completed", "sheets_completed", "color_mode",
+			"page_count", "copies", "duplex_mode",
+		}).AddRow("processing", "", "printer-1", update.NodeID, "user-1", 8, nil, nil, nil, "color", 3, 2, "longedge"))
+	mock.ExpectExec("UPDATE print_jobs").
+		WithArgs(update.JobID, update.Status, update.ErrorCode, update.ErrorMessage).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO operational_alerts").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO edge_job_update_receipts").
+		WithArgs(update.EventID, update.NodeID, update.JobID, update.Status, update.PayloadHash).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	result, err := service.ApplyTerminalJobUpdate(receipts, update)
+	if err != nil {
+		t.Fatalf("ApplyTerminalJobUpdate() error = %v", err)
+	}
+	if !result.Accepted || !result.Changed {
+		t.Fatalf("unexpected terminal result: %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyTerminalJobUpdateRefundsFailedPortalJobFromReportedUsage(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	service := &StatusService{db: &database.DB{DB: db}}
+	receipts := database.NewEdgeJobUpdateReceiptRepository(&database.DB{DB: db})
+	update := TerminalJobUpdate{
+		EventID: "event-1", PayloadHash: "hash-1", NodeID: "node-1", JobID: "job-1",
+		Status: "failed", ErrorCode: "ipp_submit_failed",
+		ImpressionsCompleted: 0, SheetsCompleted: 0,
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT event_id").WithArgs(update.EventID).
+		WillReturnRows(sqlmock.NewRows([]string{"event_id", "node_id", "job_id", "status", "payload_hash"}))
+	mock.ExpectQuery("SELECT j.status").WithArgs(update.JobID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "error_code", "printer_id", "edge_node_id", "user_id",
+			"quota_reserved", "quota_consumed", "impressions_completed", "sheets_completed", "color_mode",
+			"page_count", "copies", "duplex_mode",
+		}).AddRow("processing", "", "printer-1", update.NodeID, "user-1", 8, nil, nil, nil, "color", 3, 2, "longedge"))
+	mock.ExpectExec("UPDATE print_jobs").
+		WithArgs(update.JobID, update.Status, update.ErrorCode, update.ErrorMessage).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE print_jobs SET").
+		WithArgs(update.JobID, 0, 0, 0).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("UPDATE users").WithArgs("user-1", 8).
+		WillReturnRows(sqlmock.NewRows([]string{"print_quota_balance"}).AddRow(50))
+	mock.ExpectExec("INSERT INTO print_quota_transactions").
+		WithArgs("user-1", update.JobID, 8, 50).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO edge_job_update_receipts").
 		WithArgs(update.EventID, update.NodeID, update.JobID, update.Status, update.PayloadHash).
@@ -167,8 +319,11 @@ func TestApplyTerminalJobUpdateRejectsOtherNodeBeforeChangingTask(t *testing.T) 
 	mock.ExpectQuery("SELECT event_id").WithArgs(update.EventID).
 		WillReturnRows(sqlmock.NewRows([]string{"event_id", "node_id", "job_id", "status", "payload_hash"}))
 	mock.ExpectQuery("SELECT j.status").WithArgs(update.JobID).
-		WillReturnRows(sqlmock.NewRows([]string{"status", "error_code", "printer_id", "edge_node_id"}).
-			AddRow("processing", "", "printer-1", "node-2"))
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "error_code", "printer_id", "edge_node_id", "user_id",
+			"quota_reserved", "quota_consumed", "impressions_completed", "sheets_completed", "color_mode",
+			"page_count", "copies", "duplex_mode",
+		}).AddRow("processing", "", "printer-1", "node-2", "", 0, nil, nil, nil, "mono", 1, 1, "simplex"))
 	mock.ExpectRollback()
 
 	result, err := service.ApplyTerminalJobUpdate(receipts, update)

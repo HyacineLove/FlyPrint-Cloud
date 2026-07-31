@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"fly-print-cloud/api/internal/business"
 	"fly-print-cloud/api/internal/database"
 	"fly-print-cloud/api/internal/models"
 )
@@ -28,6 +29,8 @@ type PrinterSnapshot struct {
 // PayloadHash let Cloud acknowledge a retried report without applying it twice.
 type TerminalJobUpdate struct {
 	EventID, PayloadHash, NodeID, JobID, Status, ErrorCode, ErrorMessage string
+	ImpressionsCompleted, SheetsCompleted                                int
+	QuotaConsumed                                                        int
 }
 
 type TerminalJobUpdateResult struct {
@@ -229,11 +232,22 @@ func (s *StatusService) ApplyTerminalJobUpdate(receipts *database.EdgeJobUpdateR
 		return TerminalJobUpdateResult{Reason: "event_id_conflict"}, nil
 	}
 
-	var currentStatus, currentErrorCode, printerID, ownerNodeID string
-	err = tx.QueryRow(`SELECT j.status,COALESCE(j.error_code,''),j.printer_id::text,p.edge_node_id
+	var currentStatus, currentErrorCode, printerID, ownerNodeID, userID, colorMode string
+	var duplexMode string
+	var quotaReserved, pageCount, copies int
+	var quotaConsumed, impressionsCompleted, sheetsCompleted sql.NullInt64
+	err = tx.QueryRow(`SELECT j.status,COALESCE(j.error_code,''),j.printer_id::text,p.edge_node_id,
+		COALESCE(j.user_id::text,''),j.quota_reserved,j.quota_consumed,
+		j.impressions_completed,j.sheets_completed,j.color_mode,
+		j.page_count,j.copies,j.duplex_mode
 		FROM print_jobs j JOIN printers p ON p.id=j.printer_id
 		WHERE j.id=$1::uuid FOR UPDATE`, update.JobID).
-		Scan(&currentStatus, &currentErrorCode, &printerID, &ownerNodeID)
+		Scan(
+			&currentStatus, &currentErrorCode, &printerID, &ownerNodeID,
+			&userID, &quotaReserved, &quotaConsumed,
+			&impressionsCompleted, &sheetsCompleted, &colorMode,
+			&pageCount, &copies, &duplexMode,
+		)
 	if err == sql.ErrNoRows {
 		return TerminalJobUpdateResult{Reason: "job_not_found"}, nil
 	}
@@ -251,6 +265,13 @@ func (s *StatusService) ApplyTerminalJobUpdate(receipts *database.EdgeJobUpdateR
 		if currentStatus != update.Status {
 			return TerminalJobUpdateResult{Reason: "job_status_conflict"}, nil
 		}
+		if quotaReserved > 0 && currentStatus != "unconfirmed" &&
+			(!quotaConsumed.Valid ||
+				impressionsCompleted.Int64 != int64(update.ImpressionsCompleted) ||
+				sheetsCompleted.Int64 != int64(update.SheetsCompleted) ||
+				quotaConsumed.Int64 != int64(update.QuotaConsumed)) {
+			return TerminalJobUpdateResult{Reason: "print_usage_conflict"}, nil
+		}
 		if err := receipts.CreateTx(tx, database.EdgeJobUpdateReceipt{EventID: update.EventID, NodeID: update.NodeID, JobID: update.JobID, Status: update.Status, PayloadHash: update.PayloadHash}); err != nil {
 			return TerminalJobUpdateResult{}, err
 		}
@@ -267,6 +288,45 @@ func (s *StatusService) ApplyTerminalJobUpdate(receipts *database.EdgeJobUpdateR
 		WHERE id=$1::uuid`, update.JobID, update.Status, update.ErrorCode, update.ErrorMessage)
 	if err != nil {
 		return TerminalJobUpdateResult{}, err
+	}
+	if quotaReserved > 0 && update.Status != "unconfirmed" {
+		expectedSheets, expectedConsumed, usageErr := business.SettledQuotaUsage(
+			pageCount, copies, update.ImpressionsCompleted, duplexMode, colorMode,
+		)
+		if userID == "" || usageErr != nil ||
+			update.SheetsCompleted != expectedSheets ||
+			update.QuotaConsumed != expectedConsumed ||
+			(update.Status == "completed" && update.QuotaConsumed != quotaReserved) {
+			return TerminalJobUpdateResult{Reason: "invalid_print_usage"}, nil
+		}
+		consumed := update.QuotaConsumed
+		if consumed > quotaReserved {
+			return TerminalJobUpdateResult{Reason: "print_usage_exceeds_reservation"}, nil
+		}
+		if _, err = tx.Exec(`UPDATE print_jobs SET
+			impressions_completed=$2,sheets_completed=$3,quota_consumed=$4
+			WHERE id=$1::uuid`,
+			update.JobID, update.ImpressionsCompleted, update.SheetsCompleted, consumed,
+		); err != nil {
+			return TerminalJobUpdateResult{}, err
+		}
+		refund := quotaReserved - consumed
+		if refund > 0 {
+			var balanceAfter int
+			if err = tx.QueryRow(`UPDATE users SET print_quota_balance=print_quota_balance+$2
+				WHERE id=$1::uuid RETURNING print_quota_balance`,
+				userID, refund,
+			).Scan(&balanceAfter); err != nil {
+				return TerminalJobUpdateResult{}, err
+			}
+			if _, err = tx.Exec(`INSERT INTO print_quota_transactions
+				(user_id,print_job_id,transaction_type,delta,balance_after)
+				VALUES ($1::uuid,$2::uuid,'settlement_refund',$3,$4)`,
+				userID, update.JobID, refund, balanceAfter,
+			); err != nil {
+				return TerminalJobUpdateResult{}, err
+			}
+		}
 	}
 	if update.Status == "unconfirmed" {
 		if err = s.coordinator.OpenPrinterUnconfirmed(tx, printerID, update.NodeID, update.JobID, update.ErrorCode, map[string]interface{}{"message": update.ErrorMessage}); err != nil {

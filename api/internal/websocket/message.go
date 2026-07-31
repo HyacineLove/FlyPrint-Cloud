@@ -115,6 +115,9 @@ type JobUpdateData struct {
 	Status               string  `json:"status"`
 	ErrorCode            string  `json:"error_code"`
 	ErrorMessage         *string `json:"error_message"`
+	ImpressionsCompleted int     `json:"impressions_completed,omitempty"`
+	SheetsCompleted      int     `json:"sheets_completed,omitempty"`
+	QuotaConsumed        int     `json:"quota_consumed,omitempty"`
 	TerminalSessionID    string  `json:"terminal_session_id,omitempty"`
 	TerminalTicketHash   string  `json:"terminal_ticket_hash,omitempty"`
 	IntegrationRequestID string  `json:"integration_request_id,omitempty"`
