@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"fly-print-cloud/api/internal/config"
+	schemaMigrations "fly-print-cloud/api/internal/database/migrations"
 	"fly-print-cloud/api/internal/logger"
 	"fly-print-cloud/api/internal/security"
 
@@ -550,6 +551,11 @@ func (db *DB) InitTables() error {
 		return fmt.Errorf("failed to add deleted_at column to printers: %w", err)
 	}
 
+	// 基础表创建完成后先执行前向迁移，再执行依赖迁移表的兼容扩展。
+	// 全新数据库中 edge_terminal_sessions 等表由迁移创建，顺序不可颠倒。
+	if err := schemaMigrations.Run(db.DB); err != nil {
+		return fmt.Errorf("apply schema migrations: %w", err)
+	}
 	if err := db.initSitePortalSchema(); err != nil {
 		return err
 	}

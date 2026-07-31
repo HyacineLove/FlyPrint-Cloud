@@ -12,7 +12,6 @@ import (
 	"fly-print-cloud/api/internal/business"
 	"fly-print-cloud/api/internal/config"
 	"fly-print-cloud/api/internal/database"
-	"fly-print-cloud/api/internal/database/migrations"
 	"fly-print-cloud/api/internal/handlers"
 	"fly-print-cloud/api/internal/integration"
 	"fly-print-cloud/api/internal/logger"
@@ -96,9 +95,6 @@ func main() {
 	// 初始化数据库表
 	if err := db.InitTables(); err != nil {
 		logger.Fatal("Failed to initialize database tables", zap.Error(err))
-	}
-	if err := migrations.Run(db.DB); err != nil {
-		logger.Fatal("Failed to apply schema migrations", zap.Error(err))
 	}
 
 	// 创建默认管理员账户（如果配置了）
