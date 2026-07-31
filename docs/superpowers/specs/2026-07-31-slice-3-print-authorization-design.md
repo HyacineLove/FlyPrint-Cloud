@@ -150,6 +150,7 @@ Site Portal 登录完成时，Cloud 在同一事务中把 `site_portal_code` 和
 - `site_portal_code`
 - `terminal_session_id`
 - `confirmation_id`
+- `authorization_request_hash`
 - `local_file_id`
 - `quota_reserved`
 - `quota_consumed`
