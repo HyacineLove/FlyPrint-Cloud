@@ -23,6 +23,7 @@ nginx/ + docker-compose.yml
 - 终态（`completed/failed/canceled/unconfirmed`）须带稳定 UUID `event_id`；`processing` 为尽力而为。
 - Cloud 校验节点拥有目标打印机后，终态与 `edge_job_update_receipts` 同事务；`job_update_ack/accepted` 允许 Edge 清 outbox；`rejected` 为协议错，Edge 保留可见故障且不重试。
 - 同 `event_id` 幂等接受；同 ID 不同 node/job/status/payload hash → reject。终态单调；例外：`unconfirmed/dispatch_ack_timeout` 可被真实终态替换。
+- Site Portal 直打任务的明确终态同时携带 `impressions_completed`、`sheets_completed`、`quota_consumed`。Cloud 按任务页数、份数、单双面和彩色倍率复核，原子写入终态、实际消耗、未使用额度返还和回执；`unconfirmed` 不结算、不返还。
 
 ## 节点删除与预览绑定
 
@@ -35,6 +36,13 @@ nginx/ + docker-compose.yml
 - `/entry` 校验二维码入口凭证后签发独立 `terminal_ticket`；成功后下行 `terminal_occupied`（`msg_id` + Edge ACK；断线 pending，重连靠 `terminal_session_state` 补发）。随后按 Edge 配置的默认 Site Portal 跳转，Site Portal 在登录完成后才通知 Cloud 消费票据。
 - 当前正式流程为每终端唯一登录源，不提供用户侧入口重选。Edge 刷新会话作废未完成 ticket；官方上传/`verify` 须 `edge_terminal_sessions.Matches`；`preview_file` 须带 `terminal_session_id` + `terminal_ticket_hash`。
 - Site Portal 通过认证接口校验票据并报告外部身份。Cloud 首次登录静默创建用户映射，随后只向目标 Edge 下发 `portal_session_ready` 领取信息；PRP 访问凭证不进入 Cloud。协议见 `docs/agent/site-portal-identity-protocol.md`。
+
+## Site Portal 打印授权与额度
+
+- Edge 对已预览的 PRP 文件调用 `POST /api/v1/edge/:node_id/print-authorizations`。Cloud 只接收文件显示名、`content_hash` 对应的本地文件标识、打印参数与终端上下文，不接收文件体或 PRP 凭证。
+- Cloud 以当前 `edge_terminal_sessions` 绑定的 Site Portal 和 Cloud 用户为准，校验用户、节点与打印机状态。`(edge_node_id, confirmation_id)` 保证重复请求只返回同一审计任务；不同请求体复用确认 ID 会被拒绝。
+- 静默映射用户首次获得 50 点。预占按实体纸张计算：单面 `页数×份数`，双面 `ceil(页数/2)×份数`；彩色每张 2 点，黑白每张 1 点。额度没有每日重置；仅 `fly-print-admin` 可正向增加并留下管理员与原因审计。
+- 授权成功只创建无文件体的统一 `print_jobs` 审计记录并预占额度，不向 Edge 下发 `print_job`。Edge 使用预览阶段已有的标准 PDF 直接执行 IPP，随后通过既有终态回执结算。
 
 ## 部署边界
 
@@ -51,7 +59,7 @@ Edge→Cloud：`edge_heartbeat`、`job_update`、`submit_print_params`、`reques
 ## 第三方交互式打印与 Demo
 
 - 文件接管后不下发 `print_job`；`integration/terminal_dispatcher.go` 先发标准 `preview_file`（可选三项集成上下文 + 建议 `print_options`）。
-- 用户确认 → `submit_print_params` 回传上下文；Cloud 同事务校验后**每个集成请求仅一个**标准任务。官方分支不要求集成字段。
+- HMAC 第三方任务的用户确认仍通过 `submit_print_params` 回传上下文；Cloud 同事务校验后**每个集成请求仅一个**标准任务。Site Portal/PRP 打印改走独立的原子授权接口，不混用第三方任务确认。
 - `allow_private_file_hosts` 默认关；开启后仍仅 `allowed_file_hosts` 精确主机，并拒绝环回/链路本地等。禁止当全局私网放行。
 - Demo：`integration-demo/`，接入代码=`livacloud-demo`，路径 `/integration-demo/`。模拟 SSO/HMAC/callback；禁止在核心链路加入接入方专属分支。密钥粘贴到 `/integration-demo/setup`，不回显、不落日志。
 - HMAC 第三方打印与 Site Portal 身份链路是两套独立边界：前者维持现有功能，后者负责官方与私有域的统一登录、Cloud 静默用户映射和 Edge 凭证领取。
