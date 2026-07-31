@@ -106,7 +106,7 @@ func (r *PrintJobRepository) loadErrorCode(job *models.PrintJob) error {
 func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID, userID, userEmail, edgeNodeID, initiatorCode string, startTime, endTime *time.Time) ([]*models.PrintJob, error) {
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id,
-			   pj.user_id, COALESCE(NULLIF(u.username, ''), pj.user_name, ''), COALESCE(u.email, ''), pj.file_path, pj.file_url, pj.content_hash, pj.file_size, pj.page_count,
+			   pj.user_id, COALESCE(NULLIF(u.username, ''), pj.user_name, ''), COALESCE(u.email, ''), pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
 			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode, 
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.error_code, pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at,

@@ -92,3 +92,28 @@ func TestPrintJobRepositoryListKeepsSnapshotNameWithoutMatchedUser(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+func TestPrintJobRepositoryListTreatsFilelessPortalJobSizeAsZero(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	repo := NewPrintJobRepository(&DB{DB: sqlDB})
+
+	rows := printJobRows()
+	mock.ExpectQuery(`SELECT pj\.id[\s\S]*COALESCE\(pj\.file_size, 0\)`).
+		WithArgs(20).
+		WillReturnRows(rows)
+
+	jobs, err := repo.ListPrintJobs(20, 0, "", "", "", "", "", "", nil, nil)
+	if err != nil {
+		t.Fatalf("ListPrintJobs() error = %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].FileSize != 100 {
+		t.Fatalf("unexpected print jobs: %#v", jobs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
