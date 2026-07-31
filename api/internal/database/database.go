@@ -553,6 +553,9 @@ func (db *DB) InitTables() error {
 	if err := db.initSitePortalSchema(); err != nil {
 		return err
 	}
+	if err := db.initPrintAuthorizationSchema(); err != nil {
+		return err
+	}
 
 	logger.Info("Database tables initialized successfully")
 	return nil

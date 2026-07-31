@@ -120,10 +120,15 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 			return nil, fmt.Errorf("create external-only password hash: %w", hashErr)
 		}
 		if err = tx.QueryRow(`INSERT INTO users
-			(username,email,password_hash,role,status,last_login)
-			VALUES ($1,$2,$3,'viewer','active',$4)
+			(username,email,password_hash,role,status,last_login,print_quota_balance)
+			VALUES ($1,$2,$3,'viewer','active',$4,50)
 			RETURNING id`, username, email, passwordHash, input.Now).Scan(&cloudUserID); err != nil {
 			return nil, fmt.Errorf("create silently mapped user: %w", err)
+		}
+		if _, err = tx.Exec(`INSERT INTO print_quota_transactions
+			(user_id,transaction_type,delta,balance_after)
+			VALUES ($1,'initial_grant',50,50)`, cloudUserID); err != nil {
+			return nil, fmt.Errorf("grant initial print quota: %w", err)
 		}
 		if _, err = tx.Exec(`INSERT INTO external_identities
 			(site_portal_code,external_user_id,cloud_user_id,display_name,last_login_at)

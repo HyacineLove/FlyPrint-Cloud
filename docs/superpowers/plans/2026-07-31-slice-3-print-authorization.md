@@ -28,7 +28,7 @@
 - Create: `api/internal/business/print_quota.go`
 - Create: `api/internal/business/print_quota_test.go`
 - Create: `api/internal/database/print_authorization_schema.go`
-- Create: `api/internal/database/migrations/005_unified_print_authorization.sql`
+- Create: `api/internal/database/migrations/012_unified_print_authorization.sql`
 - Modify: `api/internal/database/database.go`
 - Modify: `api/internal/models/models.go`
 - Modify: `api/internal/database/external_identity_repository.go`

@@ -44,11 +44,16 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		WithArgs("official", "external-user-1").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO users
-		(username,email,password_hash,role,status,last_login)
-		VALUES ($1,$2,$3,'viewer','active',$4)
+		(username,email,password_hash,role,status,last_login,print_quota_balance)
+		VALUES ($1,$2,$3,'viewer','active',$4,50)
 		RETURNING id`)).
 		WithArgs("sp_321612b9d446bc5d4c63b324", "321612b9d446bc5d4c63b324@identity.flyprint.invalid", sqlmock.AnyArg(), now).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("cloud-user-1"))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO print_quota_transactions
+		(user_id,transaction_type,delta,balance_after)
+		VALUES ($1,'initial_grant',50,50)`)).
+		WithArgs("cloud-user-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO external_identities
 		(site_portal_code,external_user_id,cloud_user_id,display_name,last_login_at)
 		VALUES ($1,$2,$3,$4,$5)`)).

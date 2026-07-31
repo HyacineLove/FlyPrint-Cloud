@@ -165,14 +165,15 @@ type OperationalAlert struct {
 
 // User 用户
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`              // 用户名
-	Email        string    `json:"email"`                 // 邮箱
-	PasswordHash string    `json:"-"`                     // 密码哈希 (不返回)
-	ExternalID   *string   `json:"external_id,omitempty"` // OAuth2 外部ID
-	Role         string    `json:"role"`                  // 角色: admin/operator/viewer
-	Status       string    `json:"status"`                // 状态: active/inactive
-	LastLogin    time.Time `json:"last_login"`            // 最后登录时间
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	Username          string    `json:"username"`              // 用户名
+	Email             string    `json:"email"`                 // 邮箱
+	PasswordHash      string    `json:"-"`                     // 密码哈希 (不返回)
+	ExternalID        *string   `json:"external_id,omitempty"` // OAuth2 外部ID
+	Role              string    `json:"role"`                  // 角色: admin/operator/viewer
+	Status            string    `json:"status"`                // 状态: active/inactive
+	PrintQuotaBalance int       `json:"print_quota_balance"`   // Cloud 管理的剩余打印额度点数
+	LastLogin         time.Time `json:"last_login"`            // 最后登录时间
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
