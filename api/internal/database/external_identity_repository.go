@@ -151,6 +151,17 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		}
 	}
 
+	sessionResult, err := tx.Exec(`UPDATE edge_terminal_sessions
+		SET site_portal_code=$3,cloud_user_id=$4
+		WHERE node_id=$1 AND terminal_session_id=$2`,
+		nodeID, terminalSessionID, input.SitePortalCode, cloudUserID)
+	if err != nil {
+		return nil, fmt.Errorf("bind portal identity to terminal session: %w", err)
+	}
+	if affected, rowsErr := sessionResult.RowsAffected(); rowsErr != nil || affected != 1 {
+		return nil, ErrPortalLoginTicketInvalid
+	}
+
 	result, err := tx.Exec(`UPDATE terminal_tickets SET status='consumed',consumed_at=$2
 		WHERE ticket_hash=$1 AND status='selected'`, input.TicketHash, input.Now)
 	if err != nil {

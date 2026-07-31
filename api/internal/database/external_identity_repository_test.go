@@ -59,6 +59,11 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		VALUES ($1,$2,$3,$4,$5)`)).
 		WithArgs("official", "external-user-1", "cloud-user-1", "张老师", now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE edge_terminal_sessions
+		SET site_portal_code=$3,cloud_user_id=$4
+		WHERE node_id=$1 AND terminal_session_id=$2`)).
+		WithArgs("edge-1", "session-1", "official", "cloud-user-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE terminal_tickets SET status='consumed',consumed_at=$2
 		WHERE ticket_hash=$1 AND status='selected'`)).
 		WithArgs("ticket-hash", now).
@@ -106,6 +111,9 @@ func TestCompletePortalLoginReusesExistingMapping(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE users SET last_login").
 		WithArgs("cloud-user-existing", now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE edge_terminal_sessions").
+		WithArgs("edge-1", "session-1", "official", "cloud-user-existing").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE terminal_tickets SET status='consumed'").
 		WithArgs("ticket-hash", now).

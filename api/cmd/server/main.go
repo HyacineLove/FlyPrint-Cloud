@@ -123,6 +123,7 @@ func main() {
 	edgeNodeRepo := database.NewEdgeNodeRepository(db)
 	printerRepo := database.NewPrinterRepository(db)
 	printJobRepo := database.NewPrintJobRepository(db)
+	printAuthorizationRepo := database.NewPrintAuthorizationRepository(db)
 	fileRepo := database.NewFileRepository(db)
 	tokenUsageRepo := database.NewTokenUsageRepository(db)
 	alertRepo := database.NewOperationalAlertRepository(db)
@@ -237,6 +238,7 @@ func main() {
 	edgeNodeHandler := handlers.NewEdgeNodeHandler(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, integrationRequestRepo, opsContactRepo, integrationProviderRepo)
 	printerHandler := handlers.NewPrinterHandler(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo)
 	printJobHandler := handlers.NewPrintJobHandler(printJobRepo, printerRepo, edgeNodeRepo, wsManager, statusService, alertRepo)
+	portalPrintHandler := handlers.NewPortalPrintHandler(printAuthorizationRepo)
 	oauth2Handler := handlers.NewOAuth2Handler(&cfg.OAuth2, &cfg.Admin, userRepo, builtinAuth)
 	fileHandler := handlers.NewFileHandler(fileRepo, &cfg.Storage, storageService, wsManager, tokenManager, businessSettingsService, edgeNodeRepo, printerRepo)
 	fileHandler.SetTerminalUploadSessionBinder(terminalUploadSessions)
@@ -274,7 +276,7 @@ func main() {
 	r.Use(middleware.SecurityHeadersMiddleware())
 
 	// 设置路由
-	setupRoutes(r, userHandler, edgeNodeHandler, edgeActivationHandler, printerHandler, printJobHandler, wsHandler, oauth2Handler, fileHandler, terminalTicketHandler, sitePortalHandler, integrationProviderHandler, integrationPrintRequestHandler, businessSettingsHandler, opsContactHandler, healthHandler, printJobRepo, edgeNodeRepo, printerRepo, alertRepo)
+	setupRoutes(r, userHandler, edgeNodeHandler, edgeActivationHandler, printerHandler, printJobHandler, portalPrintHandler, wsHandler, oauth2Handler, fileHandler, terminalTicketHandler, sitePortalHandler, integrationProviderHandler, integrationPrintRequestHandler, businessSettingsHandler, opsContactHandler, healthHandler, printJobRepo, edgeNodeRepo, printerRepo, alertRepo)
 
 	// 创建HTTP服务器
 	serverAddr := cfg.Server.GetServerAddr()
@@ -310,7 +312,7 @@ func main() {
 	logger.Info("Server exited")
 }
 
-func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandler *handlers.EdgeNodeHandler, edgeActivationHandler *handlers.EdgeActivationHandler, printerHandler *handlers.PrinterHandler, printJobHandler *handlers.PrintJobHandler, wsHandler *websocket.WebSocketHandler, oauth2Handler *handlers.OAuth2Handler, fileHandler *handlers.FileHandler, terminalTicketHandler *handlers.TerminalTicketHandler, sitePortalHandler *handlers.SitePortalHandler, integrationProviderHandler *handlers.IntegrationProviderHandler, integrationPrintRequestHandler *handlers.IntegrationPrintRequestHandler, businessSettingsHandler *handlers.BusinessSettingsHandler, opsContactHandler *handlers.OpsContactHandler, healthHandler *handlers.HealthHandler, printJobRepo *database.PrintJobRepository, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, alertRepo *database.OperationalAlertRepository) {
+func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandler *handlers.EdgeNodeHandler, edgeActivationHandler *handlers.EdgeActivationHandler, printerHandler *handlers.PrinterHandler, printJobHandler *handlers.PrintJobHandler, portalPrintHandler *handlers.PortalPrintHandler, wsHandler *websocket.WebSocketHandler, oauth2Handler *handlers.OAuth2Handler, fileHandler *handlers.FileHandler, terminalTicketHandler *handlers.TerminalTicketHandler, sitePortalHandler *handlers.SitePortalHandler, integrationProviderHandler *handlers.IntegrationProviderHandler, integrationPrintRequestHandler *handlers.IntegrationPrintRequestHandler, businessSettingsHandler *handlers.BusinessSettingsHandler, opsContactHandler *handlers.OpsContactHandler, healthHandler *handlers.HealthHandler, printJobRepo *database.PrintJobRepository, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, alertRepo *database.OperationalAlertRepository) {
 	r.GET("/entry", terminalTicketHandler.EntryPage)
 	// Swagger 文档路由
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -468,6 +470,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 			// 功能 3.2.3: 放行禁用打印机的状态上报请求，仅检查节点启用状态
 			// 放行禁用节点的批量状态上报，允许监控禁用节点的打印机状态
 			edgeGroup.POST("/:node_id/printers/status", middleware.OAuth2ResourceServer("edge:printer"), middleware.EdgeNodeIdentityMatch(), printerHandler.EdgeBatchUpdatePrinterStatus)
+			edgeGroup.POST("/:node_id/print-authorizations", middleware.OAuth2ResourceServer("edge:printer"), middleware.EdgeNodeIdentityMatch(), middleware.EdgeNodeEnabledCheck(edgeNodeRepo), portalPrintHandler.Authorize)
 
 			// WebSocket 连接
 			edgeGroup.GET("/ws", wsHandler.HandleConnection)
