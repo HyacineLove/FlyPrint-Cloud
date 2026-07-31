@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Space, Switch, Table, message } from 'antd';
+import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, message } from 'antd';
 import { EditOutlined, KeyOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import type { FilterValue, SorterResult } from 'antd/es/table/interface';
@@ -16,6 +16,7 @@ interface ManagedUser {
   status: 'active' | 'inactive' | string;
   last_login?: string;
   created_at?: string;
+  print_quota_balance: number;
 }
 
 interface UserFormValues {
@@ -42,6 +43,8 @@ const Users: React.FC = () => {
   const [formVisible, setFormVisible] = useState(false);
   const [passwordUser, setPasswordUser] = useState<ManagedUser>();
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [quotaUser, setQuotaUser] = useState<ManagedUser>();
+  const [quotaVisible, setQuotaVisible] = useState(false);
   const [savingEnabled, setSavingEnabled] = useState<string>();
   const [deleting, setDeleting] = useState<string>();
   const [editingUsernameId, setEditingUsernameId] = useState<string>();
@@ -57,6 +60,7 @@ const Users: React.FC = () => {
   const [sortOrder, setSortOrder] = useState('desc');
   const [form] = Form.useForm<UserFormValues>();
   const [passwordForm] = Form.useForm<{ new_password: string }>();
+  const [quotaForm] = Form.useForm<{ amount: number; reason: string }>();
 
   const load = useCallback(async (accessToken: string, nextPage = page) => {
     setLoading(true);
@@ -240,11 +244,20 @@ const Users: React.FC = () => {
     },
     { title: '最后登录', dataIndex: 'last_login', sorter: true, render: formatDate },
     {
-      title: '操作', width: 260,
+      title: '打印额度', dataIndex: 'print_quota_balance', width: 110,
+      render: (value: number) => `${value ?? 0} 点`,
+    },
+    {
+      title: '操作', width: 360,
       render: (_, user) => (
         <Space>
           <Button icon={<EditOutlined />} onClick={() => openEdit(user)}>编辑</Button>
           <Button icon={<KeyOutlined />} onClick={() => { setPasswordUser(user); passwordForm.resetFields(); setPasswordVisible(true); }}>改密码</Button>
+          <Button onClick={() => {
+            setQuotaUser(user);
+            quotaForm.resetFields();
+            setQuotaVisible(true);
+          }}>增加额度</Button>
           <Button danger loading={deleting === user.id} onClick={() => remove(user)}>删除</Button>
         </Space>
       ),
@@ -284,6 +297,35 @@ const Users: React.FC = () => {
           } catch (error) { message.error(mapApiError(error, '修改密码失败')); }
         }}>
           <Form.Item name="new_password" label="新密码" rules={[{ required: true, min: 6, message: '密码至少需要 6 个字符' }]}><Input.Password autoComplete="new-password" /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal open={quotaVisible} title={`增加打印额度：${quotaUser?.email || ''}`} onCancel={() => setQuotaVisible(false)} onOk={() => quotaForm.submit()} destroyOnClose okText="确认增加" cancelText="取消">
+        <Form form={quotaForm} layout="vertical" onFinish={async (values) => {
+          if (!token || !quotaUser) return;
+          const payload = { amount: Number(values.amount), reason: values.reason.trim() };
+          try {
+            const response = await fetch(buildApiUrl(`/admin/users/${quotaUser.id}/print-quota-grants`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify(payload),
+            });
+            const result = await response.json();
+            if (!response.ok || result.code !== 200) throw new Error(result.message || '增加打印额度失败');
+            message.success('打印额度已增加');
+            setQuotaVisible(false);
+            quotaForm.resetFields();
+            await load(token, page);
+          } catch (error) {
+            message.error(mapApiError(error, '增加打印额度失败'));
+          }
+        }}>
+          <Form.Item name="amount" label="增加点数" rules={[{ required: true, type: 'number', min: 1, message: '请输入正整数' }]}>
+            <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="reason" label="增加原因" rules={[{ required: true, whitespace: true, max: 500, message: '请填写增加原因' }]}>
+            <Input maxLength={500} />
+          </Form.Item>
         </Form>
       </Modal>
     </div>

@@ -112,15 +112,18 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 			   pj.max_retries, pj.created_at, pj.updated_at,
 			   COALESCE(NULLIF(p.display_name, ''), p.name, '') as printer_name,
 			   COALESCE(NULLIF(n.alias, ''), n.name, '') as node_name,
-			   COALESCE(p.edge_node_id, '') as edge_node_id,
-			   COALESCE(provider.display_name, '主系统') AS initiator_name,
-			   COALESCE(provider.code, '') AS initiator_code
+			   COALESCE(pj.edge_node_id, p.edge_node_id, '') as edge_node_id,
+			   COALESCE(NULLIF(portal.display_name, ''), provider.display_name, '主系统') AS initiator_name,
+			   COALESCE(pj.site_portal_code, provider.code, '') AS initiator_code,
+			   COALESCE(pj.site_portal_code, '') AS site_portal_code,
+			   pj.quota_reserved,pj.quota_consumed,pj.impressions_completed,pj.sheets_completed
 		FROM print_jobs pj
 		LEFT JOIN users u ON u.id::text = pj.user_id
 		LEFT JOIN printers p ON pj.printer_id = p.id
 		LEFT JOIN edge_nodes n ON p.edge_node_id = n.id
 		LEFT JOIN integration_print_requests integration_request ON integration_request.print_job_id = pj.id
 		LEFT JOIN integration_providers provider ON provider.code = integration_request.provider_code
+		LEFT JOIN site_portals portal ON portal.code = pj.site_portal_code
 		WHERE 1=1`
 
 	args := []interface{}{}
@@ -204,6 +207,7 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 		var edgeNodeID sql.NullString
 		var errorCode sql.NullString
 		var initiatorCode sql.NullString
+		var quotaConsumed, impressionsCompleted, sheetsCompleted sql.NullInt64
 		err := rows.Scan(
 			&job.ID, &job.Name, &job.Status, &job.PrinterID,
 			&userID, &job.UserName, &job.UserEmail, &job.FilePath, &job.FileURL, &job.ContentHash, &job.FileSize, &job.PageCount,
@@ -211,6 +215,8 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 			&job.StartTime, &job.EndTime, &job.ErrorMessage, &errorCode, &job.RetryCount,
 			&job.MaxRetries, &job.CreatedAt, &job.UpdatedAt,
 			&printerName, &nodeName, &edgeNodeID, &job.InitiatorName, &initiatorCode,
+			&job.SitePortalCode, &job.QuotaReserved,
+			&quotaConsumed, &impressionsCompleted, &sheetsCompleted,
 		)
 		if err != nil {
 			return nil, err
@@ -234,6 +240,18 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 		}
 		if initiatorCode.Valid {
 			job.InitiatorCode = initiatorCode.String
+		}
+		if quotaConsumed.Valid {
+			value := int(quotaConsumed.Int64)
+			job.QuotaConsumed = &value
+		}
+		if impressionsCompleted.Valid {
+			value := int(impressionsCompleted.Int64)
+			job.ImpressionsCompleted = &value
+		}
+		if sheetsCompleted.Valid {
+			value := int(sheetsCompleted.Int64)
+			job.SheetsCompleted = &value
 		}
 
 		jobs = append(jobs, job)

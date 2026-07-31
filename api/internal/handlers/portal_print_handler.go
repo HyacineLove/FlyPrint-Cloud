@@ -97,6 +97,8 @@ func printAuthorizationError(err error) (int, string, string) {
 		return http.StatusConflict, "printer_not_belong_to_node", "打印机不属于当前终端。"
 	case errors.Is(err, database.ErrPrintAuthorizationPrinterUnavailable):
 		return http.StatusConflict, "printer_unavailable", "打印机当前不可用。"
+	case errors.Is(err, database.ErrPrintAuthorizationPrinterUnsupported):
+		return http.StatusConflict, "printer_capability_unsupported", "打印机不支持当前打印参数。"
 	default:
 		return http.StatusInternalServerError, "print_authorization_failed", "打印授权失败，请联系工作人员。"
 	}

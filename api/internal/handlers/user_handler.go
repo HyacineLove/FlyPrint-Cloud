@@ -17,14 +17,20 @@ import (
 
 // UserHandler 用户管理处理器
 type UserHandler struct {
-	userRepo *database.UserRepository
+	userRepo       *database.UserRepository
+	printQuotaRepo *database.PrintQuotaRepository
 }
 
 // NewUserHandler 创建用户管理处理器
-func NewUserHandler(userRepo *database.UserRepository) *UserHandler {
-	return &UserHandler{
-		userRepo: userRepo,
+func NewUserHandler(
+	userRepo *database.UserRepository,
+	printQuotaRepo ...*database.PrintQuotaRepository,
+) *UserHandler {
+	handler := &UserHandler{userRepo: userRepo}
+	if len(printQuotaRepo) > 0 {
+		handler.printQuotaRepo = printQuotaRepo[0]
 	}
+	return handler
 }
 
 // CreateUserRequest 创建用户请求
@@ -49,6 +55,50 @@ type UpdateEnabledRequest struct {
 // ChangePasswordRequest 修改密码请求
 type ChangePasswordRequest struct {
 	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+type PrintQuotaGrantRequest struct {
+	Amount int    `json:"amount" binding:"required,min=1"`
+	Reason string `json:"reason" binding:"required,min=1,max=500"`
+}
+
+func (h *UserHandler) GrantPrintQuota(c *gin.Context) {
+	var request PrintQuotaGrantRequest
+	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Reason) == "" {
+		BadRequestResponse(c, "额度必须为正整数，并填写增加原因")
+		return
+	}
+	adminID, ok := c.Get("external_id")
+	if !ok {
+		UnauthorizedResponse(c, "未找到当前管理员信息")
+		return
+	}
+	adminIDString, ok := adminID.(string)
+	if !ok || adminIDString == "" {
+		UnauthorizedResponse(c, "未找到当前管理员信息")
+		return
+	}
+	if h.printQuotaRepo == nil {
+		InternalErrorResponse(c, "额度服务不可用")
+		return
+	}
+	user, err := h.printQuotaRepo.Grant(
+		c.Param("id"), adminIDString, request.Amount, request.Reason,
+	)
+	if errors.Is(err, database.ErrPrintQuotaGrantInvalid) {
+		BadRequestResponse(c, "额度必须为正整数，并填写增加原因")
+		return
+	}
+	if errors.Is(err, database.ErrPrintQuotaUserNotFound) {
+		NotFoundResponse(c, "用户不存在")
+		return
+	}
+	if err != nil {
+		logger.Error("Failed to grant print quota", zap.Error(err))
+		InternalErrorResponse(c, "增加打印额度失败")
+		return
+	}
+	SuccessResponse(c, user)
 }
 
 // GetCurrentUserProfile 获取当前用户业务信息

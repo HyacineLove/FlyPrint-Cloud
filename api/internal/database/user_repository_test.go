@@ -28,10 +28,10 @@ func TestUserRepositoryListUsersIncludesInactiveAndAppliesFilters(t *testing.T) 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM users")).
 		WithArgs("%alice%", "viewer", "inactive").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, username, email, role, status, last_login, created_at, updated_at")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at")).
 		WithArgs("%alice%", "viewer", "inactive", 20, 0).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role", "status", "last_login", "created_at", "updated_at"}).
-			AddRow("u-1", "alice", "alice@example.com", "viewer", "inactive", nil, time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).
+			AddRow("u-1", "alice", "alice@example.com", "viewer", "inactive", 50, nil, time.Now(), time.Now()))
 
 	users, total, err := repo.ListUsers(UserListFilter{
 		Search: "alice", Role: "viewer", Status: "inactive", SortBy: "email", SortOrder: "asc", Limit: 20,
@@ -75,10 +75,10 @@ func TestUserRepositoryUpdateEnabledReturnsInactiveUser(t *testing.T) {
 		UPDATE users
 		SET status = CASE WHEN $2 THEN 'active' ELSE 'inactive' END
 		WHERE id = $1
-		RETURNING id, username, email, role, status, last_login, created_at, updated_at`)).
+		RETURNING id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at`)).
 		WithArgs("u-1", false).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role", "status", "last_login", "created_at", "updated_at"}).
-			AddRow("u-1", "alice", "alice@example.com", "viewer", "inactive", nil, time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).
+			AddRow("u-1", "alice", "alice@example.com", "viewer", "inactive", 50, nil, time.Now(), time.Now()))
 
 	user, err := repo.UpdateEnabled("u-1", false)
 	if err != nil || user == nil || user.Status != "inactive" {

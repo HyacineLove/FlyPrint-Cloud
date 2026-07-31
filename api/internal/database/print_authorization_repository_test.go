@@ -63,7 +63,7 @@ func expectNoExistingAuthorization(mock sqlmock.Sqlmock, input models.PrintAutho
 
 func expectAvailableAuthorizationPrinter(mock sqlmock.Sqlmock, input models.PrintAuthorizationInput) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT printer.edge_node_id,printer.enabled,printer.status,
-		printer.status_received_at,node.enabled,node.status
+		printer.status_received_at,node.enabled,node.status,printer.capabilities
 		FROM printers printer
 		JOIN edge_nodes node ON node.id=printer.edge_node_id
 		WHERE printer.id=$1::uuid
@@ -73,8 +73,11 @@ func expectAvailableAuthorizationPrinter(mock sqlmock.Sqlmock, input models.Prin
 		WithArgs(input.PrinterID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"edge_node_id", "printer_enabled", "printer_status",
-			"status_received_at", "node_enabled", "node_status",
-		}).AddRow(input.NodeID, true, "idle", input.Now.Add(-time.Second), true, "online"))
+			"status_received_at", "node_enabled", "node_status", "capabilities",
+		}).AddRow(
+			input.NodeID, true, "idle", input.Now.Add(-time.Second), true, "online",
+			[]byte(`{"paper_sizes":["A4"],"color_support":true,"duplex_support":true}`),
+		))
 }
 
 func TestPrintAuthorizationRepositoryCreatesFilelessAuditAndReservesQuota(t *testing.T) {

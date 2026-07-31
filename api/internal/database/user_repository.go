@@ -85,7 +85,7 @@ func scanUser(scanner interface{ Scan(...any) error }) (*models.User, error) {
 	var lastLogin sql.NullTime
 	err := scanner.Scan(
 		&user.ID, &user.Username, &user.Email, &user.Role, &user.Status,
-		&lastLogin, &user.CreatedAt, &user.UpdatedAt)
+		&user.PrintQuotaBalance, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func scanUser(scanner interface{ Scan(...any) error }) (*models.User, error) {
 // GetUserByID 根据ID获取 active 用户，供现有业务调用。
 func (r *UserRepository) GetUserByID(id string) (*models.User, error) {
 	query := `
-		SELECT id, username, email, role, status, last_login, created_at, updated_at
+		SELECT id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at
 		FROM users WHERE id = $1 AND status = 'active'`
 	user, err := scanUser(r.db.QueryRow(query, id))
 	if err != nil {
@@ -113,7 +113,7 @@ func (r *UserRepository) GetUserByID(id string) (*models.User, error) {
 // GetUserByIDAnyStatus 获取管理用用户详情，包含 inactive 用户。
 func (r *UserRepository) GetUserByIDAnyStatus(id string) (*models.User, error) {
 	query := `
-		SELECT id, username, email, role, status, last_login, created_at, updated_at
+		SELECT id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at
 		FROM users WHERE id = $1`
 	user, err := scanUser(r.db.QueryRow(query, id))
 	if err != nil {
@@ -130,12 +130,12 @@ func (r *UserRepository) GetUserByUsername(username string) (*models.User, error
 	user := &models.User{}
 	var lastLogin sql.NullTime
 	query := `
-		SELECT id, username, email, password_hash, role, status, last_login, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, print_quota_balance, last_login, created_at, updated_at
 		FROM users WHERE username = $1 AND status = 'active'`
 
 	err := r.db.QueryRow(query, username).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role,
-		&user.Status, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
+		&user.Status, &user.PrintQuotaBalance, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("user not found")
@@ -156,12 +156,12 @@ func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
 	user := &models.User{}
 	var lastLogin sql.NullTime
 	query := `
-		SELECT id, username, email, password_hash, role, status, last_login, created_at, updated_at
+		SELECT id, username, email, password_hash, role, status, print_quota_balance, last_login, created_at, updated_at
 		FROM users WHERE LOWER(email) = LOWER($1) AND status = 'active'`
 
 	err := r.db.QueryRow(query, security.NormalizeEmail(email)).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role,
-		&user.Status, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
+		&user.Status, &user.PrintQuotaBalance, &lastLogin, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("user not found")
@@ -199,7 +199,7 @@ func (r *UserRepository) UpdateEnabled(id string, enabled bool) (*models.User, e
 		UPDATE users
 		SET status = CASE WHEN $2 THEN 'active' ELSE 'inactive' END
 		WHERE id = $1
-		RETURNING id, username, email, role, status, last_login, created_at, updated_at`
+		RETURNING id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at`
 	user, err := scanUser(r.db.QueryRow(query, id, enabled))
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -331,7 +331,7 @@ func (r *UserRepository) ListUsers(filter UserListFilter) ([]*models.User, int, 
 		limit = 20
 	}
 	query := `
-		SELECT id, username, email, role, status, last_login, created_at, updated_at
+		SELECT id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at
 		FROM users` + whereSQL + `
 		ORDER BY ` + userSortColumn(filter.SortBy) + ` ` + userSortDirection(filter.SortOrder) +
 		fmt.Sprintf(`
@@ -451,7 +451,8 @@ func (r *UserRepository) UsernameExists(username string, excludeUserID ...string
 // GetUserByExternalID 通过外部ID获取用户
 func (r *UserRepository) GetUserByExternalID(externalID string) (*models.User, error) {
 	query := `
-		SELECT id, username, email, password_hash, external_id, role, status, last_login, created_at, updated_at
+		SELECT id, username, email, password_hash, external_id, role, status,
+			print_quota_balance,last_login,created_at,updated_at
 		FROM users 
 		WHERE external_id = $1`
 
@@ -466,6 +467,7 @@ func (r *UserRepository) GetUserByExternalID(externalID string) (*models.User, e
 		&externalIDPtr,
 		&user.Role,
 		&user.Status,
+		&user.PrintQuotaBalance,
 		&user.LastLogin,
 		&user.CreatedAt,
 		&user.UpdatedAt,

@@ -98,13 +98,14 @@ type PrintJob struct {
 	Status string `json:"status"` // pending/dispatched/processing/completed/failed/canceled/unconfirmed
 
 	// 关联信息
-	PrinterID   string `json:"printer_id"`
-	PrinterName string `json:"printer_name,omitempty"` // 打印机名称 (非DB字段，仅用于API返回或内部逻辑)
-	EdgeNodeID  string `json:"edge_node_id,omitempty"` // 所属节点ID（查询时填充）
-	NodeName    string `json:"node_name,omitempty"`    // 节点显示名称（别名优先）
-	UserID      string `json:"user_id"`                // 提交用户（内部兼容主键或第三方标识）
-	UserName    string `json:"user_name"`              // 提交用户名
-	UserEmail   string `json:"user_email,omitempty"`   // 提交用户邮箱（官方用户的稳定业务标识）
+	PrinterID      string `json:"printer_id"`
+	PrinterName    string `json:"printer_name,omitempty"` // 打印机名称 (非DB字段，仅用于API返回或内部逻辑)
+	EdgeNodeID     string `json:"edge_node_id,omitempty"` // 所属节点ID（查询时填充）
+	NodeName       string `json:"node_name,omitempty"`    // 节点显示名称（别名优先）
+	UserID         string `json:"user_id"`                // 提交用户（内部兼容主键或第三方标识）
+	UserName       string `json:"user_name"`              // 提交用户名
+	UserEmail      string `json:"user_email,omitempty"`   // 提交用户邮箱（官方用户的稳定业务标识）
+	SitePortalCode string `json:"site_portal_code,omitempty"`
 
 	// 任务信息
 	FilePath    string `json:"file_path"`    // 文件路径（本地文件）
@@ -115,9 +116,13 @@ type PrintJob struct {
 	Copies      int    `json:"copies"`       // 份数
 
 	// 打印设置
-	PaperSize  string `json:"paper_size"`
-	ColorMode  string `json:"color_mode"`  // color/grayscale
-	DuplexMode string `json:"duplex_mode"` // single/duplex
+	PaperSize            string `json:"paper_size"`
+	ColorMode            string `json:"color_mode"`  // color/grayscale
+	DuplexMode           string `json:"duplex_mode"` // single/duplex
+	QuotaReserved        int    `json:"quota_reserved"`
+	QuotaConsumed        *int   `json:"quota_consumed,omitempty"`
+	ImpressionsCompleted *int   `json:"impressions_completed,omitempty"`
+	SheetsCompleted      *int   `json:"sheets_completed,omitempty"`
 
 	// 执行信息
 	StartTime    *time.Time `json:"start_time"`

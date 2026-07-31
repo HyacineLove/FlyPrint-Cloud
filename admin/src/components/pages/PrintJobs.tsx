@@ -10,6 +10,8 @@ interface PrintJob {
   user_email?: string; user_name?: string;
   edge_node_id?: string; node_name?: string;
   printer_id?: string; printer_name?: string; copies?: number; created_at: string; end_time?: string;
+  site_portal_code?: string; page_count?: number; paper_size?: string; color_mode?: string; duplex_mode?: string;
+  quota_reserved?: number; quota_consumed?: number;
   status: string; error_code?: string; error_message?: string;
 }
 
@@ -110,6 +112,12 @@ const PrintJobs: React.FC = () => {
       width: 160,
       sorter: (a, b) => (a.initiator_code || a.initiator_name || '').localeCompare(b.initiator_code || b.initiator_name || ''),
       render: (_, job) => {
+        if (job.site_portal_code) {
+          return <span>
+            <div>{job.initiator_name || job.site_portal_code}</div>
+            <div style={{ color: '#8c8c8c', fontSize: 12 }}>{job.site_portal_code}</div>
+          </span>;
+        }
         if (job.initiator_code) {
           return <TwoLineLink to={`/integration-providers?code=${encodeURIComponent(job.initiator_code)}`} id={job.initiator_code} name={job.initiator_name || job.initiator_code} />;
         }
@@ -131,6 +139,26 @@ const PrintJobs: React.FC = () => {
       render: (_, job) => job.printer_id
         ? <TwoLineLink to={`/printers?printer_id=${encodeURIComponent(job.printer_id)}`} id={job.printer_id} name={job.printer_name} />
         : <>-</>,
+    },
+    {
+      title: '页数 / 份数',
+      width: 120,
+      render: (_, job) => `${job.page_count ?? 0} 页 × ${job.copies ?? 0} 份`,
+    },
+    {
+      title: '打印参数',
+      width: 180,
+      render: (_, job) => {
+        const color = job.color_mode === 'color' ? '彩色' : '黑白';
+        const duplex = job.duplex_mode === 'longedge' ? '双面长边'
+          : job.duplex_mode === 'shortedge' ? '双面短边' : '单面';
+        return `${job.paper_size || '-'} / ${color} / ${duplex}`;
+      },
+    },
+    {
+      title: '额度（预占 / 消耗）',
+      width: 160,
+      render: (_, job) => `${job.quota_reserved ?? 0} / ${job.quota_consumed ?? '-'} 点`,
     },
     { title: '任务创建时间', dataIndex: 'created_at', width: 150, sorter: (a, b) => a.created_at.localeCompare(b.created_at), render: value => <DateTimeValue value={value} /> },
     { title: '任务终态时间', width: 150, render: (_, job) => terminal(job.status) && job.end_time ? <DateTimeValue value={job.end_time} /> : '-' },
@@ -175,7 +203,7 @@ const PrintJobs: React.FC = () => {
           ) : null}
         </Space>
       </div>
-      <Card><Table rowKey="id" loading={loading} dataSource={jobs} columns={columns} pagination={{ current: page, total, pageSize: 20, showSizeChanger: false, onChange: next => load(next) }} /></Card>
+      <Card><Table rowKey="id" loading={loading} dataSource={jobs} columns={columns} scroll={{ x: 1900 }} pagination={{ current: page, total, pageSize: 20, showSizeChanger: false, onChange: next => load(next) }} /></Card>
     </div>
   );
 };

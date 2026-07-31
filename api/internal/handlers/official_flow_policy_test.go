@@ -62,8 +62,8 @@ func TestOfficialRegistrationCreatesViewerAndReturnsToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bcrypt.GenerateFromPassword() error = %v", err)
 	}
-	getUser := mock.ExpectQuery(regexp.QuoteMeta("SELECT id, username, email, password_hash, role, status, last_login, created_at, updated_at"))
-	getUser.WithArgs("alice@example.com").WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "last_login", "created_at", "updated_at"}).AddRow("user-1", "internal-user", "alice@example.com", string(hash), "viewer", "active", nil, time.Now(), time.Now()))
+	getUser := mock.ExpectQuery(regexp.QuoteMeta("SELECT id, username, email, password_hash, role, status, print_quota_balance, last_login, created_at, updated_at"))
+	getUser.WithArgs("alice@example.com").WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "password_hash", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).AddRow("user-1", "internal-user", "alice@example.com", string(hash), "viewer", "active", 0, nil, time.Now(), time.Now()))
 	lastLogin := mock.ExpectExec(regexp.QuoteMeta("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1"))
 	lastLogin.WithArgs("user-1").WillReturnResult(sqlmock.NewResult(0, 1))
 

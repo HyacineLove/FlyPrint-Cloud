@@ -124,6 +124,7 @@ func main() {
 	printerRepo := database.NewPrinterRepository(db)
 	printJobRepo := database.NewPrintJobRepository(db)
 	printAuthorizationRepo := database.NewPrintAuthorizationRepository(db)
+	printQuotaRepo := database.NewPrintQuotaRepository(db)
 	fileRepo := database.NewFileRepository(db)
 	tokenUsageRepo := database.NewTokenUsageRepository(db)
 	alertRepo := database.NewOperationalAlertRepository(db)
@@ -234,7 +235,7 @@ func main() {
 	}
 
 	// 初始化处理器
-	userHandler := handlers.NewUserHandler(userRepo)
+	userHandler := handlers.NewUserHandler(userRepo, printQuotaRepo)
 	edgeNodeHandler := handlers.NewEdgeNodeHandler(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, integrationRequestRepo, opsContactRepo, integrationProviderRepo)
 	printerHandler := handlers.NewPrinterHandler(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo)
 	printJobHandler := handlers.NewPrintJobHandler(printJobRepo, printerRepo, edgeNodeRepo, wsManager, statusService, alertRepo)
@@ -380,6 +381,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 				userManagementGroup.PATCH("/:id/enabled", userHandler.UpdateEnabled)
 				userManagementGroup.DELETE("/:id", userHandler.DeleteUser)
 				userManagementGroup.PUT("/:id/password", userHandler.ChangePassword)
+				userManagementGroup.POST("/:id/print-quota-grants", userHandler.GrantPrintQuota)
 			}
 
 			businessSettingsGroup := adminGroup.Group("/business-settings", middleware.OAuth2ResourceServer("fly-print-admin"))

@@ -11,7 +11,7 @@ const response = (data: unknown, ok = true) => ({
   json: async () => ({ code: ok ? 200 : 2006, data, message: ok ? '' : '用户存在打印中的任务，无法删除' }),
 }) as Response;
 
-const user = { id: 'user-1', username: 'Alice', email: 'alice@example.com', role: 'viewer', status: 'active', last_login: '', created_at: '2026-07-27T00:00:00Z' };
+const user = { id: 'user-1', username: 'Alice', email: 'alice@example.com', role: 'viewer', status: 'active', print_quota_balance: 50, last_login: '', created_at: '2026-07-27T00:00:00Z' };
 
 const buttonsByText = (text: string) => Array.from(document.querySelectorAll('button'))
   .filter((button) => button.textContent?.replace(/\s/g, '') === text);
@@ -75,5 +75,35 @@ describe('Users operations', () => {
       expect.stringContaining('/admin/users/user-1'),
       expect.objectContaining({ method: 'DELETE' }),
     ));
+  });
+
+  it('shows balance and posts a positive admin quota grant', async () => {
+    const fetchMock = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
+      if (url.includes('/print-quota-grants') && init?.method === 'POST') {
+        return response({ ...user, print_quota_balance: 70 });
+      }
+      if (url.includes('/admin/users')) return response({ items: [user], pagination: { total: 1 } });
+      return response({});
+    });
+    global.fetch = fetchMock as jest.Mock;
+
+    render(<MemoryRouter><Users /></MemoryRouter>);
+    expect(await screen.findByText('50 点')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '增加额度' }));
+    fireEvent.change(screen.getByLabelText('增加点数'), { target: { value: '20' } });
+    fireEvent.change(screen.getByLabelText('增加原因'), { target: { value: 'demo allowance' } });
+    fireEvent.click(buttonsByText('确认增加')[0]);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/admin/users/user-1/print-quota-grants'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ amount: 20, reason: 'demo allowance' }),
+      }),
+    ));
+    expect(screen.queryByText('减少额度')).not.toBeInTheDocument();
+    expect(screen.queryByText('重置额度')).not.toBeInTheDocument();
   });
 });

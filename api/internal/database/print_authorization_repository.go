@@ -23,6 +23,7 @@ var (
 	ErrPrintAuthorizationPrinterNotFound    = errors.New("print authorization printer not found")
 	ErrPrintAuthorizationPrinterNotOwned    = errors.New("print authorization printer not owned")
 	ErrPrintAuthorizationPrinterUnavailable = errors.New("print authorization printer unavailable")
+	ErrPrintAuthorizationPrinterUnsupported = errors.New("print authorization printer capability unsupported")
 )
 
 const authorizationPrinterStatusFreshness = 90 * time.Second
@@ -147,8 +148,9 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 	var printerNodeID, printerStatus, nodeStatus string
 	var printerEnabled, nodeEnabled bool
 	var printerStatusReceivedAt *time.Time
+	var capabilitiesJSON []byte
 	err = tx.QueryRow(`SELECT printer.edge_node_id,printer.enabled,printer.status,
-		printer.status_received_at,node.enabled,node.status
+		printer.status_received_at,node.enabled,node.status,printer.capabilities
 		FROM printers printer
 		JOIN edge_nodes node ON node.id=printer.edge_node_id
 		WHERE printer.id=$1::uuid
@@ -157,7 +159,7 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 		FOR UPDATE OF printer,node`, input.PrinterID).
 		Scan(
 			&printerNodeID, &printerEnabled, &printerStatus,
-			&printerStatusReceivedAt, &nodeEnabled, &nodeStatus,
+			&printerStatusReceivedAt, &nodeEnabled, &nodeStatus, &capabilitiesJSON,
 		)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPrintAuthorizationPrinterNotFound
@@ -172,6 +174,28 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 		printerStatus != "idle" || printerStatusReceivedAt == nil ||
 		input.Now.Sub(*printerStatusReceivedAt) > authorizationPrinterStatusFreshness {
 		return nil, ErrPrintAuthorizationPrinterUnavailable
+	}
+	var capabilities models.PrinterCapabilities
+	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
+		return nil, err
+	}
+	if input.ColorMode == "color" && !capabilities.ColorSupport {
+		return nil, ErrPrintAuthorizationPrinterUnsupported
+	}
+	if input.DuplexMode != "simplex" && !capabilities.DuplexSupport {
+		return nil, ErrPrintAuthorizationPrinterUnsupported
+	}
+	if len(capabilities.PaperSizes) > 0 {
+		paperSupported := false
+		for _, paperSize := range capabilities.PaperSizes {
+			if paperSize == input.PaperSize {
+				paperSupported = true
+				break
+			}
+		}
+		if !paperSupported {
+			return nil, ErrPrintAuthorizationPrinterUnsupported
+		}
 	}
 	if quotaBalance < reservedQuota {
 		return nil, ErrPrintQuotaInsufficient
