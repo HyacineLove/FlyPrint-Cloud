@@ -49,6 +49,36 @@ func TestValidateStorageMinIOConfigLocalProvider(t *testing.T) {
 	}
 }
 
+func TestValidateSitePortalBootstrapRequiresCompleteConfiguration(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfigForTest()
+	cfg.SitePortalBootstrap = SitePortalBootstrapConfig{
+		Code: "official",
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want incomplete Site Portal bootstrap rejection")
+	}
+}
+
+func TestValidateSitePortalBootstrapAcceptsExplicitConfiguration(t *testing.T) {
+	t.Parallel()
+
+	cfg := validConfigForTest()
+	cfg.SitePortalBootstrap = SitePortalBootstrapConfig{
+		Code:         "official",
+		DisplayName:  "FlyPrint",
+		EntryURL:     "https://portal.example.test/entry",
+		ClaimBaseURL: "https://portal.example.test",
+		APIToken:     "12345678901234567890123456789012",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func validConfigForTest() *Config {
 	return &Config{
 		App: AppConfig{

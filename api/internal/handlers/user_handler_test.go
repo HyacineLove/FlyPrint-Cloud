@@ -38,6 +38,9 @@ func TestUserHandlerDeleteUsesExternalIDForCurrentAdmin(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM print_jobs WHERE user_id = $1 AND status IN`)).
 		WithArgs("user-2").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM external_identities WHERE cloud_user_id = $1`)).
+		WithArgs("user-2").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM operational_alerts
 		WHERE job_id IN (SELECT id FROM print_jobs WHERE user_id = $1)`)).
 		WithArgs("user-2").

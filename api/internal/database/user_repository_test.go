@@ -111,3 +111,39 @@ func TestDeleteUserWithPrintJobsRejectsActiveJobsAndRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDeleteUserWithPrintJobsRemovesExternalIdentityMapping(t *testing.T) {
+	db, mock, closeDB := newUserRepositoryTestDB(t)
+	defer closeDB()
+	repo := NewUserRepository(db)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM users WHERE id = $1 FOR UPDATE`)).
+		WithArgs("u-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("u-1"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM print_jobs WHERE user_id = $1 AND status IN`)).
+		WithArgs("u-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM external_identities WHERE cloud_user_id = $1`)).
+		WithArgs("u-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		DELETE FROM operational_alerts
+		WHERE job_id IN (SELECT id FROM print_jobs WHERE user_id = $1)`)).
+		WithArgs("u-1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM print_jobs WHERE user_id = $1`)).
+		WithArgs("u-1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM users WHERE id = $1`)).
+		WithArgs("u-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := repo.DeleteUserWithPrintJobs("u-1"); err != nil {
+		t.Fatalf("DeleteUserWithPrintJobs() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

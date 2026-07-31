@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -12,12 +14,13 @@ type Config struct {
 	App      AppConfig      `mapstructure:"app"`
 	Database DatabaseConfig `mapstructure:"database"`
 
-	Server   ServerConfig   `mapstructure:"server"`
-	OAuth2   OAuth2Config   `mapstructure:"oauth2"`
-	Admin    AdminConfig    `mapstructure:"admin"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	Security SecurityConfig `mapstructure:"security"`
-	Integration IntegrationConfig `mapstructure:"integration"`
+	Server              ServerConfig              `mapstructure:"server"`
+	OAuth2              OAuth2Config              `mapstructure:"oauth2"`
+	Admin               AdminConfig               `mapstructure:"admin"`
+	Storage             StorageConfig             `mapstructure:"storage"`
+	Security            SecurityConfig            `mapstructure:"security"`
+	Integration         IntegrationConfig         `mapstructure:"integration"`
+	SitePortalBootstrap SitePortalBootstrapConfig `mapstructure:"site_portal_bootstrap"`
 }
 
 // AppConfig 应用配置
@@ -108,6 +111,16 @@ type SecurityConfig struct {
 // IntegrationConfig holds shared security infrastructure for third-party APIs.
 type IntegrationConfig struct {
 	RedisURL string `mapstructure:"redis_url"`
+}
+
+// SitePortalBootstrapConfig installs the first Site Portal before Slice 4
+// exposes explicit management APIs.
+type SitePortalBootstrapConfig struct {
+	Code         string `mapstructure:"code"`
+	DisplayName  string `mapstructure:"display_name"`
+	EntryURL     string `mapstructure:"entry_url"`
+	ClaimBaseURL string `mapstructure:"claim_base_url"`
+	APIToken     string `mapstructure:"api_token"`
 }
 
 // Load 加载配置
@@ -278,6 +291,39 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("security.download_token_ttl must be greater than 0")
 	}
 
+	if err := c.SitePortalBootstrap.Validate(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c SitePortalBootstrapConfig) Validate() error {
+	values := []string{c.Code, c.DisplayName, c.EntryURL, c.ClaimBaseURL, c.APIToken}
+	configured := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			configured++
+		}
+	}
+	if configured == 0 {
+		return nil
+	}
+	if configured != len(values) {
+		return fmt.Errorf("site_portal_bootstrap requires code, display_name, entry_url, claim_base_url, and api_token")
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9_-]{1,63}$`, c.Code); !matched {
+		return fmt.Errorf("site_portal_bootstrap.code has an invalid format")
+	}
+	for name, raw := range map[string]string{"entry_url": c.EntryURL, "claim_base_url": c.ClaimBaseURL} {
+		parsed, err := url.Parse(raw)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("site_portal_bootstrap.%s must be an absolute HTTP(S) URL", name)
+		}
+	}
+	if len(c.APIToken) < 32 {
+		return fmt.Errorf("site_portal_bootstrap.api_token must be at least 32 characters long")
+	}
 	return nil
 }
 
@@ -352,6 +398,11 @@ func setDefaults() {
 	viper.SetDefault("security.upload_token_ttl", 180)   // 3分钟
 	viper.SetDefault("security.download_token_ttl", 180) // 3分钟
 	viper.SetDefault("integration.redis_url", "")
+	viper.SetDefault("site_portal_bootstrap.code", "")
+	viper.SetDefault("site_portal_bootstrap.display_name", "")
+	viper.SetDefault("site_portal_bootstrap.entry_url", "")
+	viper.SetDefault("site_portal_bootstrap.claim_base_url", "")
+	viper.SetDefault("site_portal_bootstrap.api_token", "")
 }
 
 // GetDSN 获取数据库连接字符串

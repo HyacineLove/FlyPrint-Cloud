@@ -22,15 +22,16 @@ const (
 
 // 下行指令类型
 const (
-	CmdTypePrintJob     = "print_job"
-	CmdTypeConfigUpdate = "config_update"
-	CmdTypeReportStatus = "report_status"
-	CmdTypePreviewFile  = "preview_file"
-	CmdTypeNodeState    = "node_state"
-	CmdTypeError        = "error"        // 错误消息，用于通知 Edge 端操作失败
-	CmdTypeUploadToken       = "upload_token" // 下发上传凭证
-	CmdTypeJobUpdateAck      = "job_update_ack"
-	CmdTypeTerminalOccupied  = "terminal_occupied" // 进门票已签发，一体机应遮挡二维码
+	CmdTypePrintJob           = "print_job"
+	CmdTypeConfigUpdate       = "config_update"
+	CmdTypeReportStatus       = "report_status"
+	CmdTypePreviewFile        = "preview_file"
+	CmdTypeNodeState          = "node_state"
+	CmdTypeError              = "error"        // 错误消息，用于通知 Edge 端操作失败
+	CmdTypeUploadToken        = "upload_token" // 下发上传凭证
+	CmdTypeJobUpdateAck       = "job_update_ack"
+	CmdTypeTerminalOccupied   = "terminal_occupied" // 进门票已签发，一体机应遮挡二维码
+	CmdTypePortalSessionReady = "portal_session_ready"
 )
 
 // PreviewFilePayload 文件预览请求载荷
@@ -172,6 +173,17 @@ type TerminalOccupiedPayload struct {
 	TerminalSessionID  string    `json:"terminal_session_id"`
 	TerminalTicketHash string    `json:"terminal_ticket_hash"`
 	ExpiresAt          time.Time `json:"expires_at"`
+}
+
+// PortalSessionReadyPayload intentionally carries only the one-time claim
+// reference. Identity cookies and PRP access credentials never enter Cloud.
+type PortalSessionReadyPayload struct {
+	SitePortalCode    string    `json:"site_portal_code"`
+	ClaimBaseURL      string    `json:"claim_base_url"`
+	ClaimCode         string    `json:"claim_code"`
+	TerminalSessionID string    `json:"terminal_session_id"`
+	CloudUserID       string    `json:"cloud_user_id"`
+	ExpiresAt         time.Time `json:"expires_at"`
 }
 
 // UploadTokenResponsePayload 上传凭证响应载荷 (Cloud -> Edge)

@@ -202,6 +202,21 @@ func (m *ConnectionManager) DispatchOfficialPreview(nodeID string, payload Previ
 	return m.dispatchPreviewFile(nodeID, payload)
 }
 
+// DispatchPortalSessionReady notifies only the selected Edge. The payload has
+// a one-time Site Portal claim code and intentionally contains no PRP credential.
+func (m *ConnectionManager) DispatchPortalSessionReady(nodeID string, payload PortalSessionReadyPayload) error {
+	message, err := json.Marshal(&Message{
+		Type:      CmdTypePortalSessionReady,
+		NodeID:    nodeID,
+		Timestamp: time.Now(),
+		Data:      payload,
+	})
+	if err != nil {
+		return err
+	}
+	return m.SendToNode(nodeID, message)
+}
+
 // DispatchIntegrationPreview uses the standard preview command while carrying
 // the terminal proof required to bind it to the active kiosk session.
 func (m *ConnectionManager) DispatchIntegrationPreview(nodeID string, payload PreviewFilePayload) error {

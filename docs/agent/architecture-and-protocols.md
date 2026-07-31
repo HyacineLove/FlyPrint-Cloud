@@ -32,8 +32,9 @@ nginx/ + docker-compose.yml
 ## 二维码入口
 
 - 仅 Edge `/api/qr_code`。Cloud 回相对 `/entry?token=...`；Edge 用 `cloud.base_url` 拼接，并对 `localhost`/`127.0.0.1` **无条件**改写局域网 IP（代码不区分 http/https；HTTPS 应直接配证书域名）。`cloud.base_url` 支持 http(s)，WS 为 ws(s)。不依赖 `EXTERNAL_API_URL` 绝对地址。
-- `/entry` 校验上传凭证后签发独立 `terminal_ticket`；成功后下行 `terminal_occupied`（`msg_id` + Edge ACK；断线 pending，重连靠 `terminal_session_state` 补发）。Cloud 按 Edge 的 `login_source` 直达官方上传或指定 Provider：官方再发上传凭证进 `/upload`；第三方只传终端票据。
+- `/entry` 校验二维码入口凭证后签发独立 `terminal_ticket`；成功后下行 `terminal_occupied`（`msg_id` + Edge ACK；断线 pending，重连靠 `terminal_session_state` 补发）。随后按 Edge 配置的默认 Site Portal 跳转，Site Portal 在登录完成后才通知 Cloud 消费票据。
 - 当前正式流程为每终端唯一登录源，不提供用户侧入口重选。Edge 刷新会话作废未完成 ticket；官方上传/`verify` 须 `edge_terminal_sessions.Matches`；`preview_file` 须带 `terminal_session_id` + `terminal_ticket_hash`。
+- Site Portal 通过认证接口校验票据并报告外部身份。Cloud 首次登录静默创建用户映射，随后只向目标 Edge 下发 `portal_session_ready` 领取信息；PRP 访问凭证不进入 Cloud。协议见 `docs/agent/site-portal-identity-protocol.md`。
 
 ## 部署边界
 
@@ -43,7 +44,7 @@ nginx/ + docker-compose.yml
 
 ## WebSocket（摘要）
 
-Cloud→Edge：`print_job`、`preview_file`、`upload_token`、`terminal_occupied`、`node_state`、`config_update`、`report_status`、`error`  
+Cloud→Edge：`print_job`、`preview_file`、`upload_token`、`terminal_occupied`、`portal_session_ready`、`node_state`、`config_update`、`report_status`、`error`
 Edge→Cloud：`edge_heartbeat`、`job_update`、`submit_print_params`、`request_upload_token`、`terminal_session_state`、`ack`  
 文件 payload 带 `content_hash` + 短期 `file_access_token`；Edge 校验 `content_hash` 格式并以其作为标准 PDF 缓存键。缓存未命中时，`DocumentPipeline.resolve_canonical` 对 `source_supplier` 提供的源文件计算 SHA-256，必须与 `content_hash` 一致后才进行标准化；缓存命中时直接复用已校验生成的标准 PDF，不重新获取源文件。
 
@@ -52,8 +53,8 @@ Edge→Cloud：`edge_heartbeat`、`job_update`、`submit_print_params`、`reques
 - 文件接管后不下发 `print_job`；`integration/terminal_dispatcher.go` 先发标准 `preview_file`（可选三项集成上下文 + 建议 `print_options`）。
 - 用户确认 → `submit_print_params` 回传上下文；Cloud 同事务校验后**每个集成请求仅一个**标准任务。官方分支不要求集成字段。
 - `allow_private_file_hosts` 默认关；开启后仍仅 `allowed_file_hosts` 精确主机，并拒绝环回/链路本地等。禁止当全局私网放行。
-- Demo：`integration-demo/`，provider=`livacloud-demo`，路径 `/integration-demo/`。模拟 SSO/HMAC/callback；禁止在核心链路加 provider 专属分支。密钥粘贴到 `/integration-demo/setup`，不回显、不落日志。
-- 当前实现的对接模型是 HMAC 公网 Provider。Site Portal 私有域 Provider 仅为规划目标，未实现；不得在协议、路由或配置中把它当作可用 Provider。
+- Demo：`integration-demo/`，接入代码=`livacloud-demo`，路径 `/integration-demo/`。模拟 SSO/HMAC/callback；禁止在核心链路加入接入方专属分支。密钥粘贴到 `/integration-demo/setup`，不回显、不落日志。
+- HMAC 第三方打印与 Site Portal 身份链路是两套独立边界：前者维持现有功能，后者负责官方与私有域的统一登录、Cloud 静默用户映射和 Edge 凭证领取。
 
 ## 已知缺口（勿当已交付）
 

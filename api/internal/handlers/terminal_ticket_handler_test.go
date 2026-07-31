@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -28,6 +29,20 @@ func TestEntryPageUsesStyledErrorForMissingTicket(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("styled error page missing %q", expected)
 		}
+	}
+}
+
+func TestBuildSitePortalEntryURLPreservesExistingQueryAndAddsTicket(t *testing.T) {
+	redirect, err := buildSitePortalEntryURL("https://portal.example.test/entry?theme=official", "raw ticket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("theme") != "official" || parsed.Query().Get("terminal_ticket") != "raw ticket" {
+		t.Fatalf("unexpected redirect URL: %s", redirect)
 	}
 }
 
