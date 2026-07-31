@@ -247,8 +247,12 @@ func TestUploadContextRouteReturnsNoPRPAccessTokenAndPortalRejectsFiles(t *testi
 	filesRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(filesRecorder, filesRequest)
 	if filesRecorder.Code != http.StatusOK ||
-		!strings.Contains(filesRecorder.Body.String(), `type="file"`) ||
-		!strings.Contains(filesRecorder.Body.String(), `.pdf,.png,.jpg,.jpeg,.docx`) ||
+		strings.Count(filesRecorder.Body.String(), `type="file"`) != 1 ||
+		strings.Contains(filesRecorder.Body.String(), `accept=`) ||
+		!strings.Contains(filesRecorder.Body.String(), `id="file" type="file" hidden`) ||
+		!strings.Contains(filesRecorder.Body.String(), `id="choose-file"`) ||
+		!strings.Contains(filesRecorder.Body.String(), `input.click()`) ||
+		!strings.Contains(filesRecorder.Body.String(), `finally{button.disabled=!input.files[0]}`) ||
 		!strings.Contains(filesRecorder.Body.String(), "PDF、图片或 DOCX") ||
 		strings.Contains(filesRecorder.Body.String(), "private-prp-token") ||
 		strings.Contains(filesRecorder.Body.String(), "localStorage") ||

@@ -249,10 +249,14 @@ func (s *portalServer) filesPage(w http.ResponseWriter, r *http.Request) {
 		renderPortalError(w, http.StatusUnauthorized, "登录已失效", "请返回打印终端重新扫码登录。")
 		return
 	}
+	// 微信内置浏览器会把包含图片类型的 accept 解释为仅拍照/相册。
+	// 上传页保持单一文件入口且不设置 accept，实际类型仍由 PRP 严格校验。
 	body := `<h1>上传打印文件</h1><p>当前用户：` + template.HTMLEscapeString(session.DisplayName) +
-		`</p><input id="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx"><button id="upload">上传文件</button><p id="result" class="muted">请选择 PDF、图片或 DOCX 文件。</p>
+		`</p><input id="file" type="file" hidden><button id="choose-file" type="button" style="width:100%;padding:28px 18px;margin:10px 0 8px">点击选择文件</button><p id="selected-file" class="muted">未选择文件</p><button id="upload" disabled>上传文件</button><p id="result" class="muted">请选择 PDF、图片或 DOCX 文件。</p>
 <script>
-const input=document.getElementById('file'),button=document.getElementById('upload'),result=document.getElementById('result');
+const input=document.getElementById('file'),choose=document.getElementById('choose-file'),button=document.getElementById('upload'),result=document.getElementById('result'),selected=document.getElementById('selected-file');
+choose.onclick=()=>input.click();
+input.onchange=()=>{const file=input.files[0];selected.textContent=file?file.name:'未选择文件';button.disabled=!file};
 button.onclick=async()=>{
   const file=input.files[0];if(!file){result.textContent='请先选择文件。';return}
   button.disabled=true;result.textContent='正在申请上传…';
@@ -267,8 +271,8 @@ button.onclick=async()=>{
       request.onload=()=>request.status>=200&&request.status<300?resolve():reject(new Error('上传失败'));
       request.onerror=()=>reject(new Error('上传失败'));request.send(form);
     });
-    input.value='';result.textContent='上传成功，可返回打印终端选择文件。';
-  }catch(error){result.textContent=error.message}finally{button.disabled=false}
+    input.value='';selected.textContent='未选择文件';result.textContent='上传成功，可返回打印终端选择文件。';
+  }catch(error){result.textContent=error.message}finally{button.disabled=!input.files[0]}
 };
 </script>`
 	renderPortalPage(w, http.StatusOK, "上传打印文件", body)
