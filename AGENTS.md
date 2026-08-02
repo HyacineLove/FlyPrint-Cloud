@@ -10,6 +10,7 @@
 | 协议 / 目录 / 第三方与 Demo | `docs/agent/architecture-and-protocols.md` |
 | 启动 / 路由 / 测试命令 | `docs/agent/operations-and-verification.md` |
 | Site Portal 身份协议 | `docs/agent/site-portal-identity-protocol.md` |
+| 测试组织规则（新建测试先读） | `api/TESTING.md` |
 | 人类部署入口 | `README.md`；细节见 `docs/03-部署与验证.md` |
 | 历史归档 | `../FlyPrint-archive/README.md`（工作区外，默认不读，不参与完成判定） |
 
@@ -36,7 +37,7 @@
 - 禁止未确认的兜底、替代链路或协议分支；改方案先对话确认。
 - 可先写小 demo；合入后不得保留重复实现。
 - 改 schema：在 `InitTables` 兼容旧实例，并补 repository/handler/测试/清理。
-- 改 Cloud-Edge 协议：同步 `message.go`、序列化测试、Cloud provider test、Edge consumer test。协议以 Go 源码为准，Swagger 不完整。
+- 改 Cloud-Edge 协议：同步 `message.go`、序列化测试、Cloud provider test（`api/TESTING.md`）、Edge consumer test（`tests/README.md`）。协议以 Go 源码为准，Swagger 不完整。
 - 保留工作区已有改动；禁止 `docker compose down -v`（删卷）。
 - 不提交密码、JWT/文件访问/MinIO 密钥或生产配置；`.env.example` 仅模板。
 - 提交前检查 `git status --short`、相关 diff 与测试；源码变则更新受影响说明。
