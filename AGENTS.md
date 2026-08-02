@@ -11,9 +11,9 @@
 | 启动 / 路由 / 测试命令 | `docs/agent/operations-and-verification.md` |
 | Site Portal 身份协议 | `docs/agent/site-portal-identity-protocol.md` |
 | 人类部署入口 | `README.md`；细节见 `docs/03-部署与验证.md` |
-| 历史归档 | `../archive/README.md`（默认不读，不参与完成判定） |
+| 历史归档 | `../FlyPrint-archive/README.md`（工作区外，默认不读，不参与完成判定） |
 
-`../archive/` 是历史归档，**默认不读取、不参与范围与完成判定**；只有当前任务明确要求核对历史背景时才按需读取。旧私有域 `/Auth` / `target-dataflow` 口径见 `../archive/workspace/superseded-private-domain-2026-07-30/`。
+`../FlyPrint-archive/`（工作区外）是历史归档，**默认不读取、不参与范围与完成判定**；只有当前任务明确要求核对历史背景时才按需读取。旧私有域 `/Auth` / `target-dataflow` 口径见 `../FlyPrint-archive/workspace/superseded-private-domain-2026-07-30/`。
 
 ## 交付文档地图（关联放这里，勿回写进交付正文）
 
