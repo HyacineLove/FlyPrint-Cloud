@@ -4,7 +4,7 @@
 
 | 任务 | 文档 |
 |------|------|
-| **全局计划（先读）** | 工作区根目录 `../FlyPrint总开发计划.md`、`../FlyPrint开发任务清单.md` |
+| **全局计划（先读）** | 工作区根目录 `../control/01-总开发计划.md`、`../control/02-任务清单.md` |
 | 差距对照 / 定稿数据流 | `../docs/02-私有域接入-现状与目标差距清单.md`、`../docs/diagrams/refactoring-change-map.drawio.png` |
 | 现状基线 | `../docs/01-现状系统说明.md`、`../docs/diagrams/current-architecture.drawio.png`、`current-dataflow.drawio.png` |
 | 协议 / 目录 / 第三方与 Demo | `docs/agent/architecture-and-protocols.md` |
@@ -12,9 +12,9 @@
 | Site Portal 身份协议 | `docs/agent/site-portal-identity-protocol.md` |
 | 测试组织规则（新建测试先读） | `api/TESTING.md` |
 | 人类部署入口 | `README.md`；细节见 `docs/03-部署与验证.md` |
-| 历史归档 | `../FlyPrint-archive/README.md`（工作区外，默认不读，不参与完成判定） |
+| 历史归档 | `../../FlyPrint-archive/README.md`（工作区外，默认不读，不参与完成判定） |
 
-`../FlyPrint-archive/`（工作区外）是历史归档，**默认不读取、不参与范围与完成判定**；只有当前任务明确要求核对历史背景时才按需读取。旧私有域 `/Auth` / `target-dataflow` 口径见 `../FlyPrint-archive/workspace/superseded-private-domain-2026-07-30/`。
+`../../FlyPrint-archive/`（工作区外）是历史归档，**默认不读取、不参与范围与完成判定**；只有当前任务明确要求核对历史背景时才按需读取。旧私有域 `/Auth` / `target-dataflow` 口径见 `../../FlyPrint-archive/workspace/superseded-private-domain-2026-07-30/`。
 
 ## 交付文档地图（关联放这里，勿回写进交付正文）
 
@@ -41,5 +41,6 @@
 - 保留工作区已有改动；禁止 `docker compose down -v`（删卷）。
 - 不提交密码、JWT/文件访问/MinIO 密钥或生产配置；`.env.example` 仅模板。
 - 提交前检查 `git status --short`、相关 diff 与测试；源码变则更新受影响说明。
-- **完成态**：`[x]` 仅表示已合入（及该项验收所要求的打包/预演）；「代码/单测通过」最多 `[~]`。细则见根目录 `../FlyPrint开发任务清单.md`「用法」第 4 条。
+- **完成态**：`[x]` 仅表示已合入（及该项验收所要求的打包/预演）；「代码/单测通过」最多 `[~]`。细则见根目录 `../control/02-任务清单.md`「用法」第 4 条。
+- **文档校验**：提交前运行 `python ../scripts/doccheck.py`（链接与文档地图路径校验），有断链/失效路径时先修复再提交。
 - **交付收口**：本轮 Cloud 有改动时，全部改完后 `docker compose up --build -d`（update），禁止 `docker compose down -v`（删卷）；仅需 API 时可 `up --build -d api`。Edge 有改动时再 bump 并打安装包（见 Edge `AGENTS.md`）。
