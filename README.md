@@ -94,9 +94,9 @@ docker compose up --build -d
 
 **推荐阅读：**
 
-- 部署与验证（公网 HTTP/80 或 HTTPS、局域网形态与验收）：[`docs/部署与验证.md`](docs/部署与验证.md)
-- 第三方对接：[`docs/第三方接入指南.md`](docs/第三方接入指南.md)
-**以上默认密钥/密码仅供本机或局域网演示，禁止用于公网或生产。** 要改端口、密码或密钥时再执行 `Copy-Item .env.example .env` 后编辑。第三方对接见 [`docs/第三方接入指南.md`](docs/第三方接入指南.md)。
+- 部署与验证（公网 HTTP/80 或 HTTPS、局域网形态与验收）：[`docs/03-部署与验证.md`](docs/03-部署与验证.md)
+- 第三方对接：[`docs/04-第三方接入指南.md`](docs/04-第三方接入指南.md)
+**以上默认密钥/密码仅供本机或局域网演示，禁止用于公网或生产。** 要改端口、密码或密钥时再执行 `Copy-Item .env.example .env` 后编辑。第三方对接见 [`docs/04-第三方接入指南.md`](docs/04-第三方接入指南.md)。
 
 ## Docker Compose 启动（可选定制）
 
@@ -129,7 +129,7 @@ docker compose ps
 - 详细健康检查：`GET /api/v1/health`；
 - Swagger：`/swagger/index.html`；
 - 管理端：`/`。
-- 第三方 Demo（**可选**）：`/integration-demo/`（对接契约见 [`docs/第三方接入指南.md`](docs/第三方接入指南.md) 第 8 节）。
+- 第三方 Demo（**可选**）：`/integration-demo/`（对接契约见 [`docs/04-第三方接入指南.md`](docs/04-第三方接入指南.md) 第 8 节）。
 
 查看日志：
 
@@ -281,8 +281,8 @@ Smoke/performance 脚本会读取同级工作区中的 `fly-print-edge/config.js
 ## 文档使用范围
 
 - 本 README：产品概览、能力边界、运行组成、当前状态和本地启动入口；
-- `docs/部署与验证.md`：部署形态、配置、验收和安全更新；
-- `docs/使用指南.md`：用户、管理端和 Edge 本机的操作步骤；
-- `docs/运维指南.md`：学校侧巡检、派单、现场处置和升级；
-- `docs/第三方接入指南.md`：已实现 HMAC Provider 的接口契约，以及未实现 Site Portal 私有域 Provider 的边界说明；
+- `docs/03-部署与验证.md`：部署形态、配置、验收和安全更新；
+- `docs/01-使用指南.md`：用户、管理端和 Edge 本机的操作步骤；
+- `docs/02-运维指南.md`：学校侧巡检、派单、现场处置和升级；
+- `docs/04-第三方接入指南.md`：已实现 HMAC Provider 的接口契约，以及未实现 Site Portal 私有域 Provider 的边界说明；
 - `docs/agent/`：仅供开发 Agent 按任务读取的技术路由文档。
