@@ -285,4 +285,5 @@ Smoke/performance 脚本会读取同级工作区中的 `fly-print-edge/config.js
 - `docs/01-使用指南.md`：用户、管理端和 Edge 本机的操作步骤；
 - `docs/02-运维指南.md`：学校侧巡检、派单、现场处置和升级；
 - `docs/04-第三方接入指南.md`：已实现 HMAC Provider 的接口契约，以及未实现 Site Portal 私有域 Provider 的边界说明；
-- `docs/agent/`：仅供开发 Agent 按任务读取的技术路由文档。
+- `docs/agent/`：仅供开发 Agent 按任务读取的技术路由文档；
+- `api/TESTING.md`：测试分层与新建测试规则。
