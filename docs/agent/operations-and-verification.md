@@ -35,7 +35,7 @@ OAuth2：`api/internal/middleware/oauth2.go`；多 scope = AND；`admin` 拥有�
 
 ## 命令
 
-> **交付收口：** 本轮 Cloud 有改动时，全部改完后执行下方 `docker compose up --build -d`（update）。Edge 改动另打安装包，见工作区 `.cursor/rules/delivery-artifacts.mdc`。
+> **交付收口：** 本轮 Cloud 有改动时，全部改完后执行下方 `docker compose up --build -d`（update）。Edge 改动另打安装包（`release/build_installer.py`）。细则见两侧 `AGENTS.md`「交付收口」。
 
 ```powershell
 Copy-Item .env.example .env   # 必须改密钥后再起

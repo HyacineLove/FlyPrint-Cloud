@@ -41,4 +41,4 @@
 - 不提交密码、JWT/文件访问/MinIO 密钥或生产配置；`.env.example` 仅模板。
 - 提交前检查 `git status --short`、相关 diff 与测试；源码变则更新受影响说明。
 - **完成态**：`[x]` 仅表示已合入（及该项验收所要求的打包/预演）；「代码/单测通过」最多 `[~]`。细则见根目录 `../FlyPrint开发任务清单.md`「用法」第 4 条。
-- **交付收口**：本轮 Cloud 有改动时，全部改完后 `docker compose up --build -d`（update）。Edge 有改动时再 bump 并打安装包。详见工作区 `.cursor/rules/delivery-artifacts.mdc`。
+- **交付收口**：本轮 Cloud 有改动时，全部改完后 `docker compose up --build -d`（update），禁止 `docker compose down -v`（删卷）；仅需 API 时可 `up --build -d api`。Edge 有改动时再 bump 并打安装包（见 Edge `AGENTS.md`）。
