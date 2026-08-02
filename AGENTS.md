@@ -4,14 +4,13 @@
 
 | 任务 | 文档 |
 |------|------|
-| **全局计划（先读）** | 工作区根目录 `../control/01-总开发计划.md`、`../control/02-任务清单.md` |
-| 差距对照 / 定稿数据流 | `../docs/02-私有域接入-现状与目标差距清单.md`、`../docs/diagrams/refactoring-change-map.drawio.png` |
-| 现状基线 | `../docs/01-现状系统说明.md`、`../docs/diagrams/current-architecture.drawio.png`、`current-dataflow.drawio.png` |
+| **全局计划（先读）** | 工作区根 `../docs/plans/2026-07-31-统一打印链路重构.md` |
+| 架构 / 数据流图源 | `../docs/diagrams/`（.drawio + .png 成对） |
 | 协议 / 目录 / 第三方与 Demo | `docs/agent/architecture-and-protocols.md` |
 | 启动 / 路由 / 测试命令 | `docs/agent/operations-and-verification.md` |
 | Site Portal 身份协议 | `docs/agent/site-portal-identity-protocol.md` |
 | 测试组织规则（新建测试先读） | `api/TESTING.md` |
-| 人类部署入口 | `README.md`；细节见 `docs/03-部署与验证.md` |
+| 人类部署入口 | `README.md`；细节见 `docs/01-部署与验证.md` |
 | 历史归档 | `../../FlyPrint-archive/README.md`（工作区外，默认不读，不参与完成判定） |
 
 `../../FlyPrint-archive/`（工作区外）是历史归档，**默认不读取、不参与范围与完成判定**；只有当前任务明确要求核对历史背景时才按需读取。旧私有域 `/Auth` / `target-dataflow` 口径见 `../../FlyPrint-archive/workspace/superseded-private-domain-2026-07-30/`。
@@ -23,10 +22,10 @@
 | 文档 | 读者 / 用途 | 与其它册的分工（仅 Agent 对照） |
 |------|-------------|--------------------------------|
 | `README.md` | 项目概览：L0～L3、能力边界、运行组成、当前状态 | 不写接口字段 → 第三方指南；不写安装步骤 → 部署与验证；L4+ 源码不入此册 |
-| `docs/01-使用指南.md` | 用户 / 管理端 / Edge 本机：怎么点界面 | 不讲职责与派单 → 运维指南 |
-| `docs/02-运维指南.md` | 四方角色、监控派单、报障时机 | 不讲逐步点屏 → 使用指南；现场截图式手册可并存 |
-| `docs/03-部署与验证.md` | 安装、配置、公网 :80 / 局域网、检查单与排障 | 环境变量与网络；第三方接入填值细节 → 第三方指南 §8；产品边界 → README |
-| `docs/04-第三方接入指南.md` | 已实现 HMAC 第三方接入的对接契约 | Demo `code`=`livacloud-demo`；部署变量 / 三类地址 → 部署与验证、README；Site Portal 身份链路 → `docs/agent/site-portal-identity-protocol.md` |
+| `docs/01-部署与验证.md` | 安装、配置、公网 :80 / 局域网、检查单与排障 | 环境变量与网络；第三方接入填值细节 → 第三方指南 §8；产品边界 → README |
+| `docs/02-第三方接入指南.md` | 已实现 HMAC 第三方接入的对接契约 | Demo `code`=`livacloud-demo`；部署变量 / 三类地址 → 部署与验证、README；Site Portal 身份链路 → `docs/agent/site-portal-identity-protocol.md` |
+| `../deliverables/01-使用指南.md` | 用户 / 管理端 / Edge 本机：怎么点界面（人类手册，不参与开发参考） | 不讲职责与派单 → 运维指南 |
+| `../deliverables/02-运维指南.md` | 四方角色、监控派单、报障时机（人类手册，不参与开发参考） | 不讲逐步点屏 → 使用指南 |
 | 公网发布包 | 由交付方通过受控渠道提供；本仓不存放内部打包、安装和凭证工具 | — |
 
 **改交付文档时：** 只改该册正文；跨册关联只更新本表（及 Edge `AGENTS.md` 中指向 Cloud 的条目），不要在交付 `.md` 末尾加「见某某文档」索引。
@@ -41,6 +40,6 @@
 - 保留工作区已有改动；禁止 `docker compose down -v`（删卷）。
 - 不提交密码、JWT/文件访问/MinIO 密钥或生产配置；`.env.example` 仅模板。
 - 提交前检查 `git status --short`、相关 diff 与测试；源码变则更新受影响说明。
-- **完成态**：`[x]` 仅表示已合入（及该项验收所要求的打包/预演）；「代码/单测通过」最多 `[~]`。细则见根目录 `../control/02-任务清单.md`「用法」第 4 条。
+- **完成态**：`[x]` 仅表示已合入（及该项验收所要求的打包/预演）；「代码/单测通过」最多 `[~]`。细则见根目录 `../docs/plans/2026-07-31-统一打印链路重构.md` §7。
 - **文档校验**：提交前运行 `python ../scripts/doccheck.py`（链接与文档地图路径校验），有断链/失效路径时先修复再提交。
 - **交付收口**：本轮 Cloud 有改动时，全部改完后 `docker compose up --build -d`（update），禁止 `docker compose down -v`（删卷）；仅需 API 时可 `up --build -d api`。Edge 有改动时再 bump 并打安装包（见 Edge `AGENTS.md`）。
