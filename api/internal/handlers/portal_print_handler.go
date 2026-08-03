@@ -30,7 +30,7 @@ type portalPrintAuthorizationRequest struct {
 	SitePortalCode    string `json:"site_portal_code" binding:"required,min=1,max=64"`
 	LocalFileID       string `json:"local_file_id" binding:"required,min=1,max=128"`
 	FileDisplayName   string `json:"file_display_name" binding:"required,min=1,max=200"`
-	PageCount         int    `json:"page_count" binding:"required,min=1"`
+	PageCount         int    `json:"page_count" binding:"required,min=1,max=1000"`
 	Copies            int    `json:"copies" binding:"required,min=1,max=99"`
 	PaperSize         string `json:"paper_size" binding:"required,min=1,max=20"`
 	ColorMode         string `json:"color_mode" binding:"required,oneof=mono color"`

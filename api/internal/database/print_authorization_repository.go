@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"fly-print-cloud/api/internal/business"
+	"fly-print-cloud/api/internal/logger"
 	"fly-print-cloud/api/internal/models"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -97,19 +100,22 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 	defer tx.Rollback()
 
 	var boundPortal, cloudUserID, userStatus, displayName string
+	var boundPortalEnabled bool
 	var quotaBalance int
 	err = tx.QueryRow(`SELECT session.site_portal_code,session.cloud_user_id::text,
 		user_account.status,user_account.print_quota_balance,
+		portal.enabled,
 		COALESCE(NULLIF(identity.display_name,''),NULLIF(user_account.username,''),'')
 		FROM edge_terminal_sessions session
 		JOIN users user_account ON user_account.id=session.cloud_user_id
+		JOIN site_portals portal ON portal.code=session.site_portal_code
 		LEFT JOIN external_identities identity
 			ON identity.site_portal_code=session.site_portal_code
 			AND identity.cloud_user_id=session.cloud_user_id
 		WHERE session.node_id=$1 AND session.terminal_session_id=$2
 		FOR UPDATE OF session,user_account`,
 		input.NodeID, input.TerminalSessionID,
-	).Scan(&boundPortal, &cloudUserID, &userStatus, &quotaBalance, &displayName)
+	).Scan(&boundPortal, &cloudUserID, &userStatus, &quotaBalance, &boundPortalEnabled, &displayName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPrintAuthorizationSessionInvalid
 	}
@@ -117,6 +123,9 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 		return nil, err
 	}
 	if boundPortal != input.SitePortalCode {
+		return nil, ErrPrintAuthorizationPortalMismatch
+	}
+	if !boundPortalEnabled {
 		return nil, ErrPrintAuthorizationPortalMismatch
 	}
 	if userStatus != "active" {
@@ -177,7 +186,10 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 	}
 	var capabilities models.PrinterCapabilities
 	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
-		return nil, err
+		// DB 中能力数据损坏时降级为明确拒绝并告警，而不是 500。
+		logger.Warn("Printer capabilities JSON corrupted; rejecting authorization",
+			zap.String("printer_id", input.PrinterID), zap.Error(err))
+		return nil, ErrPrintAuthorizationPrinterUnsupported
 	}
 	if input.ColorMode == "color" && !capabilities.ColorSupport {
 		return nil, ErrPrintAuthorizationPrinterUnsupported

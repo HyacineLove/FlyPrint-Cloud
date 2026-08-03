@@ -43,6 +43,12 @@ func DispatchPrintJobAndRecord(manager *ConnectionManager, printJobRepo *databas
 		}
 		return
 	}
+	if errors.Is(err, ErrAckRejected) {
+		if updateErr := statusService.ApplyJobResult(job.ID, nodeID, job.PrinterID, "failed", "dispatch_rejected", map[string]interface{}{"message": "边缘节点明确拒绝接收打印任务"}); updateErr != nil {
+			logger.Error("Failed to record dispatch rejection", zap.String("job_id", job.ID), zap.Error(updateErr))
+		}
+		return
+	}
 	if updateErr := statusService.ApplyJobResult(job.ID, nodeID, job.PrinterID, "failed", "dispatch_failed", map[string]interface{}{"message": "打印任务未能发送到边缘节点"}); updateErr != nil {
 		logger.Error("Failed to record dispatch failure", zap.String("job_id", job.ID), zap.Error(updateErr))
 	}

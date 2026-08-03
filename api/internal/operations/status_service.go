@@ -188,7 +188,7 @@ func (s *StatusService) ApplyJobResult(jobID, nodeID, printerID, status, errorCo
 		THEN COALESCE(end_time,CURRENT_TIMESTAMP) ELSE end_time END
 		WHERE id=$1::uuid AND (
 			status NOT IN ('completed','failed','canceled','unconfirmed') OR
-			(status='unconfirmed' AND error_code='dispatch_ack_timeout' AND $2::varchar IN ('completed','failed','canceled','unconfirmed'))
+			(status='unconfirmed' AND error_code IN ('dispatch_ack_timeout','print_timeout_unconfirmed') AND $2::varchar IN ('completed','failed','canceled','unconfirmed'))
 		)`, jobID, status, errorCode, errorMessage)
 	if err != nil {
 		return err
@@ -258,9 +258,10 @@ func (s *StatusService) ApplyTerminalJobUpdate(receipts *database.EdgeJobUpdateR
 		return TerminalJobUpdateResult{Reason: "job_node_mismatch"}, nil
 	}
 
-	// A result may supersede only the explicit dispatch-ACK uncertainty. All
-	// other terminal states are immutable, including print-time uncertainty.
-	allowFromUnconfirmed := currentStatus == "unconfirmed" && currentErrorCode == "dispatch_ack_timeout"
+	// A result may supersede only the explicit dispatch-ACK or print-time
+	// uncertainty. All other terminal states are immutable.
+	allowFromUnconfirmed := currentStatus == "unconfirmed" &&
+		(currentErrorCode == "dispatch_ack_timeout" || currentErrorCode == "print_timeout_unconfirmed")
 	if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "canceled" || (currentStatus == "unconfirmed" && !allowFromUnconfirmed) {
 		if currentStatus != update.Status {
 			return TerminalJobUpdateResult{Reason: "job_status_conflict"}, nil

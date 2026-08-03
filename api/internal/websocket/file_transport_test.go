@@ -107,7 +107,7 @@ func TestDispatchPrintJobIncludesContentHash(t *testing.T) {
 	conn := &Connection{
 		NodeID:      "node-1",
 		Send:        make(chan []byte, 1),
-		pendingAcks: make(map[string]chan struct{}),
+		pendingAcks: make(map[string]chan string),
 	}
 	manager := &ConnectionManager{
 		connections: map[string]*Connection{"node-1": conn},

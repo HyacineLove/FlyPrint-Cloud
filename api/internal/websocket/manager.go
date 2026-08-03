@@ -153,12 +153,14 @@ func (m *ConnectionManager) IsNodeConnected(nodeID string) bool {
 // 用于节点删除时清理资源
 func (m *ConnectionManager) DisconnectNode(nodeID string) error {
 	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
 	conn, exists := m.connections[nodeID]
 	if !exists {
+		m.mutex.Unlock()
 		return ErrNodeNotConnected
 	}
+	// 先从 map 摘除并释放锁，避免 sleep/发送阻塞其他节点的注册与发送。
+	delete(m.connections, nodeID)
+	m.mutex.Unlock()
 
 	// 发送关闭通知（可选）
 	closeMsg := map[string]interface{}{
@@ -176,7 +178,6 @@ func (m *ConnectionManager) DisconnectNode(nodeID string) error {
 	}
 
 	// 关闭连接
-	delete(m.connections, nodeID)
 	conn.Close()
 
 	logger.Info("Forcefully disconnected Edge Node (node deleted)", zap.String("node_id", nodeID), zap.Int("total_connections", len(m.connections)))
@@ -260,7 +261,15 @@ func (m *ConnectionManager) ReplayTerminalOccupiedIfNeeded(nodeID string, payloa
 		if !payload.ExpiresAt.IsZero() {
 			pending.ExpiresAt = payload.ExpiresAt
 		}
+		// 若节点当前在线而 pending 仍存在，说明上次发送未确认（断线/ACK 超时），
+		// 重连恢复时重新投递；Edge 已绑定同 ticket hash 时不重发（避免 occupy flood）。
+		m.mutex.RLock()
+		_, connected := m.connections[nodeID]
+		m.mutex.RUnlock()
 		m.occupiedMu.Unlock()
+		if connected && !edgeHasTicket {
+			go m.dispatchTerminalOccupiedWithAck(nodeID, payload)
+		}
 		return
 	}
 	if edgeHasTicket {
@@ -394,7 +403,14 @@ func (m *ConnectionManager) DispatchPrintJob(nodeID string, job *models.PrintJob
 
 	// 使用 10秒超时等待 ACK
 	// 如果超时，意味着 Edge 端虽然在线但未能确认接收任务
-	return conn.SendCommandWithAck(&command, 10*time.Second)
+	status, err := conn.SendCommandWithAckStatus(&command, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	if status != "" && status != "accepted" {
+		return ErrAckRejected
+	}
+	return nil
 }
 
 func (m *ConnectionManager) DispatchNodeEnabledChange(nodeID string, enabled bool) error {

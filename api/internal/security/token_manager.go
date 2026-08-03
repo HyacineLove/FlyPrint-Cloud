@@ -108,19 +108,6 @@ func (tm *TokenManager) SetTTLProvider(provider tokenTTLProvider) {
 // GenerateUploadToken emits a unique upload token. New-format tokens include a nonce
 // so repeated refreshes within the same second do not recreate the same token string.
 func (tm *TokenManager) GenerateUploadToken(nodeID, printerID string) (string, time.Time, error) {
-	if tm.tokenRepo != nil {
-		if tokenRepo, ok := tm.tokenRepo.(interface {
-			RevokeTokensByNodeAndResource(tokenType, nodeID, resourceID string) (int64, error)
-		}); ok {
-			revokedCount, err := tokenRepo.RevokeTokensByNodeAndResource(TokenTypeUpload, nodeID, printerID)
-			if err != nil {
-				logger.Warn("Failed to revoke old upload tokens for node and printer", zap.String("node_id", nodeID), zap.String("printer_id", printerID), zap.Error(err))
-			} else if revokedCount > 0 {
-				logger.Debug("Revoked old upload tokens for node and printer", zap.Int64("count", revokedCount), zap.String("node_id", nodeID), zap.String("printer_id", printerID))
-			}
-		}
-	}
-
 	now := time.Now()
 	issuedAt := now.Unix()
 	expiresAt := now.Add(time.Duration(tm.currentUploadTTL()) * time.Second).Unix()
@@ -144,6 +131,9 @@ func (tm *TokenManager) GenerateUploadToken(nodeID, printerID string) (string, t
 			}
 		}
 	}
+
+	// 上传 token 不做批量 revoke：短 TTL + 一次性消费已防重放，且批量 revoke
+	// 会误伤"已通过阶段一、正在上传"的在途请求。旧 token 由 TTL 自然失效。
 
 	return token, time.Unix(expiresAt, 0), nil
 }
@@ -272,15 +262,27 @@ func (tm *TokenManager) ValidateDownloadToken(token, expectedFileID, expectedNod
 
 	if tm.tokenRepo != nil {
 		tokenHash := generateTokenHash(token)
-		err := tm.tokenRepo.MarkTokenAsUsed(tokenHash, TokenTypeDownload, nodeID, fileID, jobID, time.Unix(expiresAt, 0))
-		if err != nil {
-			if err.Error() == "token has already been used" {
-				return nil, ErrTokenAlreadyUsed
+		// 下载 token 在 TTL 内可重试：Edge 断线重连同一 URL 不应因一次性消费而 401。
+		// 失效由 TTL 过期与 RevokeTokensByNodeAndResource（换发时）保证。
+		if reader, ok := tm.tokenRepo.(tokenStatusReader); ok {
+			_, revoked, found, err := reader.GetTokenStatus(tokenHash)
+			if err != nil {
+				return nil, &TokenError{Code: "database_error", Message: "Failed to verify token usage"}
 			}
-			if err.Error() == "token has been revoked" {
+			if found && revoked {
 				return nil, &TokenError{Code: "token_revoked", Message: "Token has been revoked"}
 			}
-			return nil, &TokenError{Code: "database_error", Message: "Failed to verify token usage"}
+		} else {
+			err := tm.tokenRepo.MarkTokenAsUsed(tokenHash, TokenTypeDownload, nodeID, fileID, jobID, time.Unix(expiresAt, 0))
+			if err != nil {
+				if err.Error() == "token has already been used" {
+					return nil, ErrTokenAlreadyUsed
+				}
+				if err.Error() == "token has been revoked" {
+					return nil, &TokenError{Code: "token_revoked", Message: "Token has been revoked"}
+				}
+				return nil, &TokenError{Code: "database_error", Message: "Failed to verify token usage"}
+			}
 		}
 	}
 

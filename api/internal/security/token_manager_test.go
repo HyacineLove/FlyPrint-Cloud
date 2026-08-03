@@ -104,8 +104,10 @@ func TestGenerateUploadTokenProducesUniqueTokensForRapidRefresh(t *testing.T) {
 		t.Fatalf("expected latest token to validate, got %v", err)
 	}
 
-	if _, err := tm.ValidateUploadToken(first); GetTokenErrorCode(err) != "token_revoked" {
-		t.Fatalf("expected previous token to be revoked, got %v", err)
+	// 上传 token 不做批量 revoke：短 TTL + 一次性消费防重放，
+	// 避免在途上传被并发刷新打断（见 GenerateUploadToken 注释）。
+	if _, err := tm.VerifyUploadTokenAvailable(first, "node-1", "printer-1"); err != nil {
+		t.Fatalf("previous token should remain available within TTL (no batch revoke), got %v", err)
 	}
 }
 

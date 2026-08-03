@@ -30,7 +30,7 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// 最大消息大小
-	maxMessageSize = 8192
+	maxMessageSize = 1024 * 1024
 
 	// ACK 等待超时时间
 	ackTimeout = 5 * time.Second
@@ -58,7 +58,7 @@ type Connection struct {
 	IntegrationRequests *database.IntegrationPrintRequestRepository
 
 	// ACK 机制相关
-	pendingAcks map[string]chan struct{}
+	pendingAcks map[string]chan string
 	ackMutex    sync.Mutex
 }
 
@@ -82,7 +82,7 @@ func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManag
 		UploadSessions:      uploadSessions,
 		Callbacks:           callbacks,
 		IntegrationRequests: integrationRequests,
-		pendingAcks:         make(map[string]chan struct{}),
+		pendingAcks:         make(map[string]chan string),
 	}
 }
 
@@ -181,15 +181,24 @@ func (c *Connection) WritePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				_ = w.Close()
+				return
+			}
 
 			// 批量发送队列中的其他消息
 			n := len(c.Send)
 			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
+				if _, err := w.Write([]byte{'\n'}); err != nil {
+					_ = w.Close()
+					return
+				}
 				select {
 				case queued := <-c.Send:
-					w.Write(queued)
+					if _, err := w.Write(queued); err != nil {
+						_ = w.Close()
+						return
+					}
 				case <-c.done:
 					_ = w.Close()
 					return
@@ -346,7 +355,11 @@ func (c *Connection) handleAckDirect(ack *CommandAck) {
 	defer c.ackMutex.Unlock()
 
 	if ch, exists := c.pendingAcks[ack.MsgID]; exists {
-		close(ch) // 关闭 channel 通知等待者
+		// 非阻塞投递 ACK status（等待者可能已超时删除该 entry）
+		select {
+		case ch <- ack.Status:
+		default:
+		}
 		delete(c.pendingAcks, ack.MsgID)
 		logger.Debug("Received ACK for message from node", zap.String("msg_id", ack.MsgID), zap.String("node_id", c.NodeID), zap.String("command_id", ack.CommandID), zap.String("status", ack.Status))
 	} else {
@@ -356,21 +369,23 @@ func (c *Connection) handleAckDirect(ack *CommandAck) {
 
 // SendCommandWithAck 发送指令并等待确认
 func (c *Connection) SendCommandWithAck(cmd *Command, timeout time.Duration) error {
+	_, err := c.SendCommandWithAckStatus(cmd, timeout)
+	return err
+}
+
+// SendCommandWithAckStatus 发送指令并等待确认，返回 ACK 的 status（accepted/rejected）。
+func (c *Connection) SendCommandWithAckStatus(cmd *Command, timeout time.Duration) (string, error) {
 	if cmd.MsgID == "" {
 		cmd.MsgID = uuid.New().String()
 	}
 
-	ackCh := make(chan struct{})
+	ackCh := make(chan string, 1)
 
 	c.ackMutex.Lock()
 	c.pendingAcks[cmd.MsgID] = ackCh
 	c.ackMutex.Unlock()
 
 	// 无论成功与否，都要确保从 map 中移除（避免内存泄漏）
-	// 注意：如果成功收到 ACK，handleAck 会删除 map entry。
-	// 这里主要是处理超时或发送失败的情况。
-	// 但如果在 handleAck 删除前 delete，会导致 handleAck 找不到。
-	// 所以最好的方式是：如果 handleAck 还没处理，这里超时后删除。
 	defer func() {
 		c.ackMutex.Lock()
 		delete(c.pendingAcks, cmd.MsgID)
@@ -379,14 +394,14 @@ func (c *Connection) SendCommandWithAck(cmd *Command, timeout time.Duration) err
 
 	logger.Debug("Sending command to node with ACK expectation", zap.String("command_type", cmd.Type), zap.String("msg_id", cmd.MsgID), zap.String("node_id", c.NodeID))
 	if err := c.SendCommand(cmd); err != nil {
-		return err
+		return "", err
 	}
 
 	select {
-	case <-ackCh:
-		return nil
+	case status := <-ackCh:
+		return status, nil
 	case <-time.After(timeout):
-		return fmt.Errorf("%w: message %s", ErrAckTimeout, cmd.MsgID)
+		return "", fmt.Errorf("%w: message %s", ErrAckTimeout, cmd.MsgID)
 	}
 }
 

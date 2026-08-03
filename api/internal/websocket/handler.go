@@ -118,8 +118,8 @@ func (h *WebSocketHandler) HandleConnection(c *gin.Context) {
 
 	// 配置WebSocket升级器
 	upgrader := websocket.Upgrader{
-		ReadBufferSize:  10 * 1024 * 1024, // 10MB - 限制单次读取消息大小
-		WriteBufferSize: 10 * 1024 * 1024, // 10MB - 限制单次写入消息大小
+		ReadBufferSize:  1024 * 1024, // 1MB - 限制单次读取消息大小
+		WriteBufferSize: 1024 * 1024, // 1MB - 限制单次写入消息大小
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
 
@@ -152,6 +152,23 @@ func (h *WebSocketHandler) HandleConnection(c *gin.Context) {
 
 	// 注册连接
 	h.manager.register <- connection
+
+	// 重连恢复：补发该节点未完成的 pending/dispatched 任务。
+	// Edge 断线期间创建或已分发但未完成的任务，在此重新投递；
+	// Edge 侧 inbox 幂等去重，同一 job 只产生一次物理打印。
+	go func() {
+		jobs, err := h.printJobRepo.GetPendingOrDispatchedJobsByEdgeNodeID(nodeID)
+		if err != nil {
+			logger.Warn("Failed to load pending jobs for reconnect redispatch", zap.String("node_id", nodeID), zap.Error(err))
+			return
+		}
+		for _, job := range jobs {
+			DispatchPrintJobAndRecord(h.manager, h.printJobRepo, h.statusService, job, nodeID)
+		}
+		if len(jobs) > 0 {
+			logger.Info("Redispatched pending jobs after reconnect", zap.String("node_id", nodeID), zap.Int("count", len(jobs)))
+		}
+	}()
 
 	// 启动读写协程
 	go connection.WritePump()

@@ -38,9 +38,11 @@ func expectAuthorizationIdentity(
 ) {
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT session.site_portal_code,session.cloud_user_id::text,
 		user_account.status,user_account.print_quota_balance,
+		portal.enabled,
 		COALESCE(NULLIF(identity.display_name,''),NULLIF(user_account.username,''),'')
 		FROM edge_terminal_sessions session
 		JOIN users user_account ON user_account.id=session.cloud_user_id
+		JOIN site_portals portal ON portal.code=session.site_portal_code
 		LEFT JOIN external_identities identity
 			ON identity.site_portal_code=session.site_portal_code
 			AND identity.cloud_user_id=session.cloud_user_id
@@ -48,8 +50,8 @@ func expectAuthorizationIdentity(
 		FOR UPDATE OF session,user_account`)).
 		WithArgs(input.NodeID, input.TerminalSessionID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"site_portal_code", "cloud_user_id", "status", "print_quota_balance", "display_name",
-		}).AddRow("official", "22222222-2222-2222-2222-222222222222", status, balance, "演示用户"))
+			"site_portal_code", "cloud_user_id", "status", "print_quota_balance", "enabled", "display_name",
+		}).AddRow("official", "22222222-2222-2222-2222-222222222222", status, balance, true, "演示用户"))
 }
 
 func expectNoExistingAuthorization(mock sqlmock.Sqlmock, input models.PrintAuthorizationInput) {
