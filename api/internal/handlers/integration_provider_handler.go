@@ -35,8 +35,8 @@ type providerRequest struct {
 	DisplayName           string `json:"display_name"`
 	EntryURL              string `json:"entry_url"`
 	CallbackBaseURL       string `json:"callback_base_url"`
-	EntryVisible          bool   `json:"entry_visible"`
-	Enabled               bool   `json:"enabled"`
+	EntryVisible          *bool  `json:"entry_visible"`
+	Enabled               *bool  `json:"enabled"`
 	AllowedIPCIDRs        string `json:"allowed_ip_cidrs"`
 	AllowedFileHosts      string `json:"allowed_file_hosts"`
 	AllowPrivateFileHosts bool   `json:"allow_private_file_hosts"`
@@ -142,6 +142,13 @@ func (h *IntegrationProviderHandler) Update(c *gin.Context) {
 	}
 	provider := providerFromRequest(request)
 	provider.Code = current.Code // provider code is immutable after creation.
+	// 部分更新语义：未提供的可选字段保留当前值，避免缺字段把 enabled/entry_visible 重置
+	if request.Enabled == nil {
+		provider.Enabled = current.Enabled
+	}
+	if request.EntryVisible == nil {
+		provider.EntryVisible = current.EntryVisible
+	}
 	if err := h.validate(provider); err != nil {
 		BadRequestResponse(c, err.Error())
 		return
@@ -243,13 +250,15 @@ func (h *IntegrationProviderHandler) Rotate(c *gin.Context) {
 }
 
 func providerFromRequest(request providerRequest) *models.IntegrationProvider {
+	entryVisible := request.EntryVisible != nil && *request.EntryVisible
+	enabled := request.Enabled != nil && *request.Enabled
 	return &models.IntegrationProvider{
 		Code:                  request.Code,
 		DisplayName:           strings.TrimSpace(request.DisplayName),
 		EntryURL:              strings.TrimSpace(request.EntryURL),
 		CallbackBaseURL:       strings.TrimSpace(request.CallbackBaseURL),
-		EntryVisible:          request.EntryVisible,
-		Enabled:               request.Enabled,
+		EntryVisible:          entryVisible,
+		Enabled:               enabled,
 		AllowedIPCIDRs:        strings.TrimSpace(request.AllowedIPCIDRs),
 		AllowedFileHosts:      strings.TrimSpace(request.AllowedFileHosts),
 		AllowPrivateFileHosts: request.AllowPrivateFileHosts,
