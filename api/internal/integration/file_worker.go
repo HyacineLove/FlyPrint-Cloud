@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -23,6 +24,9 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+// errTransientFileFetch 标记网络/服务端 5xx/存储等瞬时错误：应重试而非永久失败。
+var errTransientFileFetch = errors.New("transient file fetch error")
 
 // FileWorker is the single owner of provider file retrieval. It validates the
 // remote resource before it becomes a FlyPrint file; Edge never receives the
@@ -56,17 +60,24 @@ func (w *FileWorker) Run(ctx context.Context) {
 	}
 }
 
-func (w *FileWorker) ProcessOne(ctx context.Context) error {
-	request, err := w.requests.ClaimWaitingFile(time.Now(), 2*time.Minute)
+func (w *FileWorker) ProcessOne(ctx context.Context) error {	request, err := w.requests.ClaimWaitingFile(time.Now(), 2*time.Minute)
 	if err != nil || request == nil {
 		return err
 	}
 	provider, err := w.providers.Get(request.ProviderCode, false)
-	if err != nil || provider == nil || !provider.Enabled {
+	if err != nil {
+		// DB/瞬时错误：不永久失败，返回 err 交给 worker 循环重试
+		return err
+	}
+	if provider == nil || !provider.Enabled {
 		return w.fail(request.ID, "provider_unavailable", "provider is unavailable")
 	}
 	file, objectKey, err := w.downloadAndStore(ctx, request, provider)
 	if err != nil {
+		if errors.Is(err, errTransientFileFetch) {
+			// 网络/5xx/存储等瞬时错误：释放 claim 重试，不标记永久失败
+			return err
+		}
 		return w.fail(request.ID, "file_validation_failed", "provider file could not be accepted")
 	}
 	if err := w.files.Create(file); err != nil {
@@ -95,10 +106,14 @@ func (w *FileWorker) downloadAndStore(ctx context.Context, request *models.Integ
 	}
 	response, err := fetchApprovedURL(ctx, request.FileURL, provider.AllowedFileHosts, provider.AllowPrivateFileHosts)
 	if err != nil {
-		return nil, "", err
+		// 网络/连接类瞬时错误可重试；URL 格式错误会持续失败直到 claim 超时释放
+		return nil, "", errTransientFileFetch
 	}
 	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if response.StatusCode >= 500 {
+		return nil, "", errTransientFileFetch
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("provider file status is not successful")
 	}
 
@@ -116,7 +131,7 @@ func (w *FileWorker) downloadAndStore(ctx context.Context, request *models.Integ
 		err = closeErr
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, "", errTransientFileFetch
 	}
 	if written != request.FileSize {
 		return nil, "", fmt.Errorf("provider file size does not match")
@@ -156,8 +171,9 @@ func validateStoredMIME(path, declared, allowed string) error {
 		return err
 	}
 	detected := http.DetectContentType(buffer[:count])
+	detectedBase, _, _ := mime.ParseMediaType(detected)
 	declaredBase, _, _ := mime.ParseMediaType(declared)
-	if !strings.EqualFold(detected, declaredBase) || !allowedCSVContains(allowed, declaredBase) {
+	if !strings.EqualFold(detectedBase, declaredBase) || !allowedCSVContains(allowed, declaredBase) {
 		return fmt.Errorf("provider file MIME does not match")
 	}
 	return nil
