@@ -856,7 +856,8 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 
 	// Process-state reports are intentionally realtime-only. They do not use the
 	// durable terminal receipt protocol and cannot overwrite a terminal result.
-	dispatchUnconfirmed := existingJob.Status == "unconfirmed" && existingJob.ErrorCode == "dispatch_ack_timeout"
+	dispatchUnconfirmed := existingJob.Status == "unconfirmed" &&
+		(existingJob.ErrorCode == "dispatch_ack_timeout" || existingJob.ErrorCode == "print_timeout_unconfirmed")
 	if (existingJob.Status == "completed" || existingJob.Status == "failed" || existingJob.Status == "canceled" || existingJob.Status == "unconfirmed") && !dispatchUnconfirmed {
 		logger.Debug("Ignoring late status update for terminal job", zap.String("job_id", jobData.JobID), zap.String("current_status", existingJob.Status), zap.String("incoming_status", jobData.Status))
 		return

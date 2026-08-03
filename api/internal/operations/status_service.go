@@ -188,7 +188,7 @@ func (s *StatusService) ApplyJobResult(jobID, nodeID, printerID, status, errorCo
 		THEN COALESCE(end_time,CURRENT_TIMESTAMP) ELSE end_time END
 		WHERE id=$1::uuid AND (
 			status NOT IN ('completed','failed','canceled','unconfirmed') OR
-			(status='unconfirmed' AND error_code IN ('dispatch_ack_timeout','print_timeout_unconfirmed') AND $2::varchar IN ('completed','failed','canceled','unconfirmed'))
+			(status='unconfirmed' AND error_code IN ('dispatch_ack_timeout','print_timeout_unconfirmed') AND $2::varchar IN ('processing','completed','failed','canceled','unconfirmed'))
 		)`, jobID, status, errorCode, errorMessage)
 	if err != nil {
 		return err
