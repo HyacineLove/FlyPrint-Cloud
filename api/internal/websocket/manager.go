@@ -25,6 +25,7 @@ type ConnectionManager struct {
 
 	occupiedMu      sync.Mutex
 	pendingOccupied map[string]*TerminalOccupiedPayload // node_id -> pending occupy until ACK
+	occupiedDispatchAt map[string]time.Time           // node_id -> last dispatch attempt time
 }
 
 // NewConnectionManager 创建连接管理器
@@ -36,7 +37,8 @@ func NewConnectionManager(tokenManager *security.TokenManager, statusService *op
 		unregister:      make(chan *Connection),
 		TokenManager:    tokenManager,
 		StatusService:   statusService,
-		pendingOccupied: make(map[string]*TerminalOccupiedPayload),
+		pendingOccupied:     make(map[string]*TerminalOccupiedPayload),
+		occupiedDispatchAt:  make(map[string]time.Time),
 	}
 }
 
@@ -263,11 +265,13 @@ func (m *ConnectionManager) ReplayTerminalOccupiedIfNeeded(nodeID string, payloa
 		}
 		// 若节点当前在线而 pending 仍存在，说明上次发送未确认（断线/ACK 超时），
 		// 重连恢复时重新投递；Edge 已绑定同 ticket hash 时不重发（避免 occupy flood）。
+		// 距上次 dispatch 在 ACK 窗口（10s）内视为在途等待，不重复投递。
 		m.mutex.RLock()
 		_, connected := m.connections[nodeID]
 		m.mutex.RUnlock()
+		lastDispatch, dispatched := m.occupiedDispatchAt[nodeID]
 		m.occupiedMu.Unlock()
-		if connected && !edgeHasTicket {
+		if connected && !edgeHasTicket && (!dispatched || time.Since(lastDispatch) >= ackTimeout) {
 			go m.dispatchTerminalOccupiedWithAck(nodeID, payload)
 		}
 		return
@@ -283,6 +287,10 @@ func (m *ConnectionManager) ReplayTerminalOccupiedIfNeeded(nodeID string, payloa
 }
 
 func (m *ConnectionManager) dispatchTerminalOccupiedWithAck(nodeID string, payload TerminalOccupiedPayload) {
+	m.occupiedMu.Lock()
+	m.occupiedDispatchAt[nodeID] = time.Now()
+	m.occupiedMu.Unlock()
+
 	m.mutex.RLock()
 	conn, exists := m.connections[nodeID]
 	m.mutex.RUnlock()
