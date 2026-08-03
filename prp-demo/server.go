@@ -271,7 +271,11 @@ func (s *server) uploadCORS(next http.Handler) http.Handler {
 }
 
 func (s *server) writeFileError(w http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
 	switch {
+	case errors.As(err, &maxBytesErr):
+		// MaxBytesReader 触顶（文件超过 MaxFileSizeBytes+1MB 上限），返回 413 而非 500
+		writeError(w, http.StatusRequestEntityTooLarge, "file_too_large")
 	case errors.Is(err, errUnsupportedFileType):
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_file_type")
 	case errors.Is(err, errFileTooLarge):
