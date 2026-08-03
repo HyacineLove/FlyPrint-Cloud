@@ -356,6 +356,32 @@ func (m *ConnectionManager) dispatchPreviewFile(nodeID string, payload PreviewFi
 
 // DispatchPrintJob 发送打印任务指令
 func (m *ConnectionManager) DispatchPrintJob(nodeID string, job *models.PrintJob) error {
+	// 兼容入口：未提供 token 时按需生成
+	token, expiresAt := m.prepareFileAccessToken(nodeID, job)
+	return m.dispatchPrintJob(nodeID, job, token, expiresAt)
+}
+
+// prepareFileAccessToken 为 job 生成下载凭证（未提供复用 token 时）。
+func (m *ConnectionManager) prepareFileAccessToken(nodeID string, job *models.PrintJob) (string, *time.Time) {
+	if job.FileURL == "" || m.TokenManager == nil {
+		return "", nil
+	}
+	fileID := extractProxyFileID(job.FileURL)
+	if fileID == "" {
+		return "", nil
+	}
+	token, expiresAt, err := m.TokenManager.GenerateDownloadToken(fileID, job.ID, nodeID)
+	if err != nil {
+		logger.Error("Failed to generate download token for job", zap.String("job_id", job.ID), zap.Error(err))
+		return "", nil
+	}
+	logger.Debug("Generated download token for job", zap.String("job_id", job.ID), zap.Time("expires_at", expiresAt))
+	return token, &expiresAt
+}
+
+// dispatchPrintJob 发送打印任务指令；fileAccessToken 可由调用方传入复用，
+// 避免重试换发时 revoke 上一轮已下发的在途 token。
+func (m *ConnectionManager) dispatchPrintJob(nodeID string, job *models.PrintJob, fileAccessToken string, fileAccessTokenExpiresAt *time.Time) error {
 	// 构造打印任务数据
 	printJobData := PrintJobData{
 		JobID:                job.ID,
@@ -376,19 +402,10 @@ func (m *ConnectionManager) DispatchPrintJob(nodeID string, job *models.PrintJob
 		IntegrationRequestID: job.IntegrationRequestID,
 	}
 
-	// 如果有文件URL，生成一次性下载凭证
-	if job.FileURL != "" && m.TokenManager != nil {
-		fileID := extractProxyFileID(job.FileURL)
-		if fileID != "" {
-			token, expiresAt, err := m.TokenManager.GenerateDownloadToken(fileID, job.ID, nodeID)
-			if err != nil {
-				logger.Error("Failed to generate download token for job", zap.String("job_id", job.ID), zap.Error(err))
-			} else {
-				printJobData.FileAccessToken = token
-				printJobData.FileAccessTokenExpiresAt = &expiresAt
-				logger.Debug("Generated download token for job", zap.String("job_id", job.ID), zap.Time("expires_at", expiresAt))
-			}
-		}
+	// 如果有文件URL，填充（复用或新生成）下载凭证
+	if fileAccessToken != "" {
+		printJobData.FileAccessToken = fileAccessToken
+		printJobData.FileAccessTokenExpiresAt = fileAccessTokenExpiresAt
 	}
 
 	// 构造指令消息

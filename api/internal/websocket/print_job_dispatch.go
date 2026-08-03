@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"errors"
+	"time"
 
 	"fly-print-cloud/api/internal/database"
 	"fly-print-cloud/api/internal/logger"
@@ -17,9 +18,16 @@ func DispatchPrintJobAndRecord(manager *ConnectionManager, printJobRepo *databas
 	// A delivery is accepted only after Edge has durably recorded it. The same
 	// job ID is intentionally sent again with a new message ID when that ACK is
 	// missing; Edge's inbox turns those deliveries into one physical print.
+	// 下载凭证只生成一次并在重试间复用：换发新 token 会 revoke 上一轮已下发的
+	// token，导致 ACK 丢失但已开始下载的 Edge 在途请求 401。
+	var fileAccessToken string
+	var fileAccessTokenExpiresAt *time.Time
+	if job.FileURL != "" && manager.TokenManager != nil {
+		fileAccessToken, fileAccessTokenExpiresAt = manager.prepareFileAccessToken(nodeID, job)
+	}
 	var err error
 	for attempt := 1; attempt <= 3; attempt++ {
-		err = manager.DispatchPrintJob(nodeID, job)
+		err = manager.dispatchPrintJob(nodeID, job, fileAccessToken, fileAccessTokenExpiresAt)
 		if err == nil || !errors.Is(err, ErrAckTimeout) || attempt == 3 {
 			break
 		}
