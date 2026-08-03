@@ -30,7 +30,7 @@ type oidcJWKS struct {
 }
 
 var oidcKeyCache struct {
-	sync.Mutex
+	sync.RWMutex
 	url       string
 	keys      map[string]*rsa.PublicKey
 	expiresAt time.Time
@@ -68,25 +68,45 @@ func parseOIDCToken(tokenString string, cfg *config.OAuth2Config) (*OAuth2TokenI
 }
 
 func getOIDCKey(jwksURL, kid string) (*rsa.PublicKey, error) {
-	oidcKeyCache.Lock()
-	defer oidcKeyCache.Unlock()
-	if oidcKeyCache.url != jwksURL || time.Now().After(oidcKeyCache.expiresAt) {
-		if err := refreshOIDCKeysLocked(jwksURL); err != nil {
-			return nil, err
-		}
-	}
+	// 快速路径：读锁查缓存，不阻塞并发验证
+	oidcKeyCache.RLock()
+	cachedURL, expired := oidcKeyCache.url, time.Now().After(oidcKeyCache.expiresAt)
 	key := oidcKeyCache.keys[kid]
+	oidcKeyCache.RUnlock()
+	if key != nil && cachedURL == jwksURL && !expired {
+		return key, nil
+	}
+	// 缓存过期/换 URL：锁外刷新（refreshOIDCKeys 内部双检合并并发刷新），
+	// 避免 5s 网络请求在全局锁内串行阻塞所有 token 验证。
+	if err := refreshOIDCKeys(jwksURL); err != nil {
+		return nil, err
+	}
+	oidcKeyCache.RLock()
+	key = oidcKeyCache.keys[kid]
+	oidcKeyCache.RUnlock()
 	if key == nil {
 		// Key rotation may introduce a new kid before the cache expires.
-		if err := refreshOIDCKeysLocked(jwksURL); err != nil {
+		if err := refreshOIDCKeys(jwksURL); err != nil {
 			return nil, err
 		}
+		oidcKeyCache.RLock()
 		key = oidcKeyCache.keys[kid]
+		oidcKeyCache.RUnlock()
 	}
 	if key == nil {
 		return nil, fmt.Errorf("OIDC signing key %q not found", kid)
 	}
 	return key, nil
+}
+
+// refreshOIDCKeys 双检刷新：并发请求只执行一次网络刷新。
+func refreshOIDCKeys(jwksURL string) error {
+	oidcKeyCache.Lock()
+	defer oidcKeyCache.Unlock()
+	if oidcKeyCache.url == jwksURL && !time.Now().After(oidcKeyCache.expiresAt) {
+		return nil // 已被并发刷新
+	}
+	return refreshOIDCKeysLocked(jwksURL)
 }
 
 func refreshOIDCKeysLocked(jwksURL string) error {

@@ -204,6 +204,15 @@ func tokenInfoFromClaims(claims jwt.MapClaims) *OAuth2TokenInfo {
 		}
 	}
 
+	// 提取顶层 groups（部分 OIDC Provider 用顶层 groups 表达权限）
+	if groups, ok := claims["groups"].([]interface{}); ok {
+		for _, group := range groups {
+			if groupStr, ok := group.(string); ok {
+				tokenInfo.RealmAccess.Roles = append(tokenInfo.RealmAccess.Roles, groupStr)
+			}
+		}
+	}
+
 	// 提取 resource_access roles
 	if resourceAccess, ok := claims["resource_access"].(map[string]interface{}); ok {
 		tokenInfo.ResourceAccess = make(map[string]struct {
@@ -320,11 +329,8 @@ func validateScopes(userRoles []string, requiredScopes []string) bool {
 		return len(userRoles) > 0
 	}
 	
-	// admin 角色拥有所有权限
-	if contains(userRoles, "admin") {
-		return true
-	}
-	
+	// admin 角色不隐式拥有所有权限：权限必须显式匹配 requiredScopes，
+	// 避免任意 Provider 发放名为 "admin" 的角色即获得全部管理能力。
 	// 检查是否包含所有必需的权限（AND逻辑）
 	for _, requiredScope := range requiredScopes {
 		if !contains(userRoles, requiredScope) {
