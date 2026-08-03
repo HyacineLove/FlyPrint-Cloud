@@ -90,6 +90,10 @@ func (s *server) handleCreateUploadContext(w http.ResponseWriter, r *http.Reques
 	}
 	raw, err := s.uploadContexts.create(claims.Subject, expiresAt)
 	if err != nil {
+		if errors.Is(err, errUploadContextLimit) {
+			writeError(w, http.StatusTooManyRequests, "too_many_upload_contexts")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}

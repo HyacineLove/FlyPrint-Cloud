@@ -114,9 +114,6 @@ func randomFileID() (string, error) {
 }
 
 func (s *fileStore) uploadFile(ctx context.Context, owner, originalName, declaredMediaType string, source io.Reader, now time.Time) (fileItem, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	displayName := filepath.Base(strings.ReplaceAll(originalName, `\`, "/"))
 	mediaType, _, err := mime.ParseMediaType(declaredMediaType)
 	if err != nil {
@@ -134,6 +131,7 @@ func (s *fileStore) uploadFile(ctx context.Context, owner, originalName, declare
 	targetName := id + extension
 	targetPath := filepath.Join(s.filesDir, targetName)
 
+	// —— 锁外：网络读取、哈希与内容校验（慢速客户端不阻塞列表/下载/清理）——
 	temporary, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o640)
 	if err != nil {
 		return fileItem{}, fmt.Errorf("create temporary file: %w", err)
@@ -157,17 +155,21 @@ func (s *fileStore) uploadFile(ctx context.Context, owner, originalName, declare
 	if err := validateTemporaryFile(temporary, size, mediaType); err != nil {
 		return fileItem{}, errUnsupportedFileType
 	}
-	if err := s.cleanupExpiredLocked(ctx, now.UTC()); err != nil {
-		return fileItem{}, err
-	}
-	if err := s.ensureCapacityLocked(ctx, owner, size); err != nil {
-		return fileItem{}, err
-	}
 	if err := temporary.Sync(); err != nil {
 		return fileItem{}, fmt.Errorf("sync temporary file: %w", err)
 	}
 	if err := temporary.Close(); err != nil {
 		return fileItem{}, fmt.Errorf("close temporary file: %w", err)
+	}
+
+	// —— 锁内：容量治理、原子发布与元数据写入 ——
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.cleanupExpiredLocked(ctx, now.UTC()); err != nil {
+		return fileItem{}, err
+	}
+	if err := s.ensureCapacityLocked(ctx, owner, size); err != nil {
+		return fileItem{}, err
 	}
 	if err := os.Rename(temporaryPath, targetPath); err != nil {
 		return fileItem{}, fmt.Errorf("publish file: %w", err)
@@ -616,8 +618,12 @@ func (s *fileStore) reconcileStartup(ctx context.Context) error {
 	return nil
 }
 
+// databaseTimeFormat 固定 9 位纳秒的 RFC3339 表示。固定宽度保证字符串
+// 字典序与时间序一致（RFC3339Nano 去尾零导致 ".5Z" > ".51Z" 的错序 bug）。
+const databaseTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
+
 func formatDatabaseTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
+	return value.UTC().Format(databaseTimeFormat)
 }
 
 func parseDatabaseTime(value string) (time.Time, error) {
