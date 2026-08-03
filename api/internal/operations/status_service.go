@@ -259,9 +259,12 @@ func (s *StatusService) ApplyTerminalJobUpdate(receipts *database.EdgeJobUpdateR
 	}
 
 	// A result may supersede only the explicit dispatch-ACK or print-time
-	// uncertainty. All other terminal states are immutable.
+	// uncertainty. All other terminal states are immutable. An unconfirmed job
+	// with an empty error_code is unclassified uncertainty and must also be
+	// supersedable, otherwise it can never be recovered (Edge always carries
+	// error_code, but an update may have cleared it to NULL).
 	allowFromUnconfirmed := currentStatus == "unconfirmed" &&
-		(currentErrorCode == "dispatch_ack_timeout" || currentErrorCode == "print_timeout_unconfirmed")
+		(currentErrorCode == "" || currentErrorCode == "dispatch_ack_timeout" || currentErrorCode == "print_timeout_unconfirmed")
 	if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "canceled" || (currentStatus == "unconfirmed" && !allowFromUnconfirmed) {
 		if currentStatus != update.Status {
 			return TerminalJobUpdateResult{Reason: "job_status_conflict"}, nil
