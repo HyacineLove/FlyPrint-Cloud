@@ -182,6 +182,24 @@ func (r *TokenUsageRepository) RevokeTokensByNodeAndResource(tokenType, nodeID, 
 	return result.RowsAffected()
 }
 
+// RevokeTokensByNodeResourceAndJob invalidates only earlier download tokens
+// for the same node, file, and print job. Tokens for another concurrent job
+// must remain usable even when they reference the same file.
+func (r *TokenUsageRepository) RevokeTokensByNodeResourceAndJob(tokenType, nodeID, resourceID, jobID string) (int64, error) {
+	result, err := r.db.Exec(`
+		UPDATE token_usage_records
+		SET revoked = TRUE, revoked_at = CURRENT_TIMESTAMP
+		WHERE token_type = $1
+		  AND node_id = $2
+		  AND resource_id = $3
+		  AND job_id = $4
+		  AND revoked = FALSE`, tokenType, nodeID, resourceID, jobID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // RevokeAllTokensByNode 撤销指定节点的所有Token（所有类型、所有资源）
 // 用于节点下线或重连时清理所有旧Token
 func (r *TokenUsageRepository) RevokeAllTokensByNode(nodeID string) (int64, error) {

@@ -31,4 +31,5 @@ type PortalLoginCompletion struct {
 	CloudUserID       string
 	SitePortalCode    string
 	ClaimBaseURL      string
+	ReadyEventID      string
 }

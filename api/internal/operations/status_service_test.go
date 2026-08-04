@@ -116,6 +116,100 @@ func TestApplyJobResultRejectsUnknownStatusBeforeDatabaseWrite(t *testing.T) {
 	}
 }
 
+func TestApplyJobResultRefundsReservedQuotaWhenDispatchFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	databaseHandle := &database.DB{DB: db}
+	service := NewStatusService(databaseHandle, database.NewOperationalAlertRepository(databaseHandle))
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT j.status").WithArgs("job-1").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "error_code", "user_id", "quota_reserved", "quota_consumed", "printer_id", "edge_node_id"}).
+			AddRow("pending", "", "user-1", 8, nil, "printer-1", "node-1"))
+	mock.ExpectExec("UPDATE print_jobs SET").
+		WithArgs("job-1", "failed", "dispatch_failed", "dispatch failed").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("UPDATE users").WithArgs("user-1", 8).
+		WillReturnRows(sqlmock.NewRows([]string{"print_quota_balance"}).AddRow(50))
+	mock.ExpectExec("INSERT INTO print_quota_transactions").
+		WithArgs("user-1", "job-1", 8, 50).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if err := service.ApplyJobResult("job-1", "node-1", "printer-1", "failed", "dispatch_failed", map[string]interface{}{"message": "dispatch failed"}); err != nil {
+		t.Fatalf("ApplyJobResult() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCleanupStaleJobsUsesStatusServiceSettlement(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	databaseHandle := &database.DB{DB: db}
+	service := NewStatusService(databaseHandle, database.NewOperationalAlertRepository(databaseHandle))
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+
+	mock.ExpectQuery("SELECT pj.id::text").
+		WithArgs(now.Add(-30 * time.Minute)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "edge_node_id", "printer_id"}).AddRow("job-1", "node-1", "printer-1"))
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT j.status").WithArgs("job-1").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "error_code", "user_id", "quota_reserved", "quota_consumed", "printer_id", "edge_node_id"}).
+			AddRow("dispatched", "", "user-1", 8, nil, "printer-1", "node-1"))
+	mock.ExpectExec("UPDATE print_jobs SET").
+		WithArgs("job-1", "failed", "print_timeout_failed", "Edge node did not report status").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("UPDATE users").WithArgs("user-1", 8).
+		WillReturnRows(sqlmock.NewRows([]string{"print_quota_balance"}).AddRow(50))
+	mock.ExpectExec("INSERT INTO print_quota_transactions").
+		WithArgs("user-1", "job-1", 8, 50).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	if _, err := service.CleanupStaleJobs(now, 30*time.Minute); err != nil {
+		t.Fatalf("CleanupStaleJobs() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyDispatchUnconfirmedReportsNoChangeWhenJobWasAlreadyAccepted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	service := NewStatusService(&database.DB{DB: db}, database.NewOperationalAlertRepository(&database.DB{DB: db}))
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE print_jobs SET status='unconfirmed'").
+		WithArgs("job-1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	changed, err := service.ApplyDispatchUnconfirmed("job-1", "node-1", "printer-1")
+	if err != nil {
+		t.Fatalf("ApplyDispatchUnconfirmed() error = %v", err)
+	}
+	if changed {
+		t.Fatal("expected no transition when job was already accepted")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestApplyTerminalJobUpdatePersistsResultAndReceiptTogether(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

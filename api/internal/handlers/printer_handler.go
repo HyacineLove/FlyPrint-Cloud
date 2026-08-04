@@ -26,10 +26,17 @@ type PrinterHandler struct {
 	tokenUsageRepo *database.TokenUsageRepository
 	statusService  *operations.StatusService
 	alertRepo      *database.OperationalAlertRepository
+	callbacks      *database.IntegrationCallbackRepository
 }
 
 func NewPrinterHandler(printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, statusService *operations.StatusService, alertRepo *database.OperationalAlertRepository) *PrinterHandler {
-	return &PrinterHandler{
+	return NewPrinterHandlerWithCallbacks(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo, nil)
+}
+
+// NewPrinterHandlerWithCallbacks wires callback persistence for lifecycle
+// settlement before a printer is disabled or deleted.
+func NewPrinterHandlerWithCallbacks(printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, statusService *operations.StatusService, alertRepo *database.OperationalAlertRepository, callbacks *database.IntegrationCallbackRepository) *PrinterHandler {
+	h := &PrinterHandler{
 		printerRepo:    printerRepo,
 		edgeNodeRepo:   edgeNodeRepo,
 		printJobRepo:   printJobRepo,
@@ -37,7 +44,30 @@ func NewPrinterHandler(printerRepo *database.PrinterRepository, edgeNodeRepo *da
 		tokenUsageRepo: tokenUsageRepo,
 		statusService:  statusService,
 		alertRepo:      alertRepo,
+		callbacks:      callbacks,
 	}
+	return h
+}
+
+func (h *PrinterHandler) settleActiveJobs(printerID, reason string) error {
+	if h.printJobRepo == nil || h.statusService == nil {
+		return fmt.Errorf("active job settlement service unavailable")
+	}
+	refs, err := h.printJobRepo.ListActiveJobRefsByPrinterID(printerID)
+	if err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if err := h.statusService.ApplyJobResult(ref.ID, ref.EdgeNodeID, ref.PrinterID, "failed", reason, map[string]interface{}{"message": "Printer was disabled or deleted"}); err != nil {
+			return err
+		}
+		if h.callbacks != nil {
+			if err := h.callbacks.TransitionForJob(ref.ID, "failed", reason, "Printer was disabled or deleted"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // UpdatePrinterRequest 更新打印机请求（Edge Node使用）
@@ -281,6 +311,7 @@ func (h *PrinterHandler) UpdatePrinter(c *gin.Context) {
 	}
 
 	// 尝试解析为管理界面的简单更新请求
+	disablingPrinter := false
 	var adminReq AdminUpdatePrinterRequest
 	if err := c.ShouldBindJSON(&adminReq); err == nil {
 		// 管理界面更新（仅更新display_name和enabled）
@@ -293,15 +324,7 @@ func (h *PrinterHandler) UpdatePrinter(c *gin.Context) {
 		if adminReq.Enabled != nil {
 			printer.Enabled = *adminReq.Enabled
 		}
-
-		// 当打印机从启用变为禁用时，撤销该节点上此打印机的所有上传Token
-		if oldEnabled && !printer.Enabled && h.tokenUsageRepo != nil {
-			if revoked, err := h.tokenUsageRepo.RevokeTokensByNodeAndResource("upload", printer.EdgeNodeID, printer.ID); err != nil {
-				logger.Warn("Failed to revoke upload tokens for disabled printer on node", zap.String("printer_id", printer.ID), zap.String("node_id", printer.EdgeNodeID), zap.Error(err))
-			} else if revoked > 0 {
-				logger.Info("Revoked upload tokens for disabled printer on node", zap.Int64("revoked", revoked), zap.String("printer_id", printer.ID), zap.String("node_id", printer.EdgeNodeID))
-			}
-		}
+		disablingPrinter = oldEnabled && !printer.Enabled
 	} else {
 		// 尝试解析为Edge Node的完整更新请求
 		var req UpdatePrinterRequest
@@ -333,6 +356,30 @@ func (h *PrinterHandler) UpdatePrinter(c *gin.Context) {
 		InternalErrorResponse(c, "更新打印机失败")
 		return
 	}
+	// UpdatePrinter commits the printer row lock before this sweep. A racing
+	// authorization therefore either observes disabled state or is included.
+	if disablingPrinter && h.printJobRepo != nil {
+		activeCount, err := h.printJobRepo.CountActiveJobsByPrinter(printerID)
+		if err != nil {
+			logger.Error("Failed to count active jobs after disabling printer", zap.String("printer_id", printerID), zap.Error(err))
+			InternalErrorResponse(c, "检查活动任务失败")
+			return
+		}
+		if activeCount > 0 {
+			if err := h.settleActiveJobs(printerID, "printer_disabled"); err != nil {
+				logger.Error("Failed to settle active jobs after disabling printer", zap.String("printer_id", printerID), zap.Error(err))
+				InternalErrorResponse(c, "收敛活动任务失败")
+				return
+			}
+		}
+	}
+	if disablingPrinter && h.tokenUsageRepo != nil {
+		if revoked, err := h.tokenUsageRepo.RevokeTokensByNodeAndResource("upload", printer.EdgeNodeID, printer.ID); err != nil {
+			logger.Warn("Failed to revoke upload tokens for disabled printer on node", zap.String("printer_id", printer.ID), zap.String("node_id", printer.EdgeNodeID), zap.Error(err))
+		} else if revoked > 0 {
+			logger.Info("Revoked upload tokens for disabled printer on node", zap.Int64("revoked", revoked), zap.String("printer_id", printer.ID), zap.String("node_id", printer.EdgeNodeID))
+		}
+	}
 
 	// 功能 3.2.3: 移除 printer_state WebSocket 消息
 	// 打印机启用/禁用状态变更不再通过 WebSocket 通知 Edge 端
@@ -357,25 +404,26 @@ func (h *PrinterHandler) DeletePrinter(c *gin.Context) {
 		return
 	}
 
-	// 检查是否有活动任务（pending, dispatched, printing 状态）
-	if h.printJobRepo != nil {
-		activeCount, err := h.printJobRepo.CountActiveJobsByPrinter(printerID)
-		if err != nil {
-			logger.Error("Failed to count active jobs for printer", zap.String("printer_id", printerID), zap.Error(err))
-			InternalErrorResponse(c, "检查活动任务失败")
-			return
-		}
-		if activeCount > 0 {
-			BadRequestResponse(c, "该打印机有正在进行的任务，无法删除")
-			return
-		}
-	}
-
 	// 删除打印机
 	if err := h.printerRepo.DeletePrinter(printerID); err != nil {
 		logger.Error("Failed to delete printer", zap.String("printer_id", printerID), zap.Error(err))
 		InternalErrorResponse(c, "删除打印机失败")
 		return
+	}
+	if h.printJobRepo != nil {
+		activeCount, err := h.printJobRepo.CountActiveJobsByPrinter(printerID)
+		if err != nil {
+			logger.Error("Failed to count active jobs after deleting printer", zap.String("printer_id", printerID), zap.Error(err))
+			InternalErrorResponse(c, "检查活动任务失败")
+			return
+		}
+		if activeCount > 0 {
+			if err := h.settleActiveJobs(printerID, "printer_deleted"); err != nil {
+				logger.Error("Failed to settle active jobs after deleting printer", zap.String("printer_id", printerID), zap.Error(err))
+				InternalErrorResponse(c, "收敛活动任务失败")
+				return
+			}
+		}
 	}
 
 	// 功能 3.2.4: 移除 printer_deleted WebSocket 消息
@@ -500,6 +548,21 @@ func (h *PrinterHandler) EdgeDeletePrinter(c *gin.Context) {
 	if err := h.printerRepo.DeletePrinterByEdgeNode(printerID, edgeNodeID); err != nil {
 		NotFoundResponse(c, "打印机不存在")
 		return
+	}
+	if h.printJobRepo != nil {
+		activeCount, err := h.printJobRepo.CountActiveJobsByPrinter(printerID)
+		if err != nil {
+			logger.Error("Failed to count active jobs after edge printer deletion", zap.String("printer_id", printerID), zap.String("edge_node_id", edgeNodeID), zap.Error(err))
+			InternalErrorResponse(c, "检查活动任务失败")
+			return
+		}
+		if activeCount > 0 {
+			if err := h.settleActiveJobs(printerID, "printer_deleted"); err != nil {
+				logger.Error("Failed to settle active jobs after edge printer deletion", zap.String("printer_id", printerID), zap.String("edge_node_id", edgeNodeID), zap.Error(err))
+				InternalErrorResponse(c, "收敛活动任务失败")
+				return
+			}
+		}
 	}
 	SuccessResponse(c, gin.H{"message": "打印机删除成功"})
 }

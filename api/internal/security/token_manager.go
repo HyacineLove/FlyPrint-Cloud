@@ -141,13 +141,13 @@ func (tm *TokenManager) GenerateUploadToken(nodeID, printerID string) (string, t
 func (tm *TokenManager) GenerateDownloadToken(fileID, jobID, nodeID string) (string, time.Time, error) {
 	if tm.tokenRepo != nil {
 		if tokenRepo, ok := tm.tokenRepo.(interface {
-			RevokeTokensByNodeAndResource(tokenType, nodeID, resourceID string) (int64, error)
+			RevokeTokensByNodeResourceAndJob(tokenType, nodeID, resourceID, jobID string) (int64, error)
 		}); ok {
-			revokedCount, err := tokenRepo.RevokeTokensByNodeAndResource(TokenTypeDownload, nodeID, fileID)
+			revokedCount, err := tokenRepo.RevokeTokensByNodeResourceAndJob(TokenTypeDownload, nodeID, fileID, jobID)
 			if err != nil {
-				logger.Warn("Failed to revoke old download tokens for node and file", zap.String("node_id", nodeID), zap.String("file_id", fileID), zap.Error(err))
+				logger.Warn("Failed to revoke old download tokens for same job", zap.String("node_id", nodeID), zap.String("file_id", fileID), zap.String("job_id", jobID), zap.Error(err))
 			} else if revokedCount > 0 {
-				logger.Debug("Revoked old download tokens for node and file", zap.Int64("count", revokedCount), zap.String("node_id", nodeID), zap.String("file_id", fileID))
+				logger.Debug("Revoked old download tokens for same job", zap.Int64("count", revokedCount), zap.String("node_id", nodeID), zap.String("file_id", fileID), zap.String("job_id", jobID))
 			}
 		}
 	}

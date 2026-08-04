@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"fly-print-cloud/api/internal/database"
 	"fly-print-cloud/api/internal/logger"
 	"fly-print-cloud/api/internal/models"
+	"fly-print-cloud/api/internal/operations"
 	"fly-print-cloud/api/internal/websocket"
 
 	"github.com/gin-gonic/gin"
@@ -27,11 +29,19 @@ type EdgeNodeHandler struct {
 	tickets             *database.TerminalTicketRepository
 	uploadSessions      *database.TerminalUploadSessionRepository
 	integrationRequests *database.IntegrationPrintRequestRepository
+	statusService       *operations.StatusService
+	callbacks           *database.IntegrationCallbackRepository
 }
 
 // NewEdgeNodeHandler 创建 Edge Node 管理处理器
 func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, integrationRequests *database.IntegrationPrintRequestRepository, opsContactRepo *database.OpsContactRepository, providerRepo *database.IntegrationProviderRepository) *EdgeNodeHandler {
-	return &EdgeNodeHandler{
+	return NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, tickets, uploadSessions, integrationRequests, opsContactRepo, providerRepo, nil, nil)
+}
+
+// NewEdgeNodeHandlerWithServices wires the lifecycle settlement dependencies
+// used when disabling or deleting an Edge node.
+func NewEdgeNodeHandlerWithServices(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, integrationRequests *database.IntegrationPrintRequestRepository, opsContactRepo *database.OpsContactRepository, providerRepo *database.IntegrationProviderRepository, statusService *operations.StatusService, callbacks *database.IntegrationCallbackRepository) *EdgeNodeHandler {
+	h := &EdgeNodeHandler{
 		db:                  db,
 		edgeNodeRepo:        edgeNodeRepo,
 		printerRepo:         printerRepo,
@@ -44,7 +54,31 @@ func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeReposito
 		uploadSessions:      uploadSessions,
 		integrationRequests: integrationRequests,
 		providerRepo:        providerRepo,
+		statusService:       statusService,
+		callbacks:           callbacks,
 	}
+	return h
+}
+
+func (h *EdgeNodeHandler) settleActiveJobs(nodeID, reason string) error {
+	if h.printJobRepo == nil || h.statusService == nil {
+		return fmt.Errorf("active job settlement service unavailable")
+	}
+	refs, err := h.printJobRepo.ListActiveJobRefsByEdgeNodeID(nodeID)
+	if err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if err := h.statusService.ApplyJobResult(ref.ID, ref.EdgeNodeID, ref.PrinterID, "failed", reason, map[string]interface{}{"message": "Edge infrastructure was disabled or deleted"}); err != nil {
+			return err
+		}
+		if h.callbacks != nil {
+			if err := h.callbacks.TransitionForJob(ref.ID, "failed", reason, "Edge infrastructure was disabled or deleted"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // RegisterEdgeNodeRequest Edge Node 注册请求
@@ -537,6 +571,24 @@ func (h *EdgeNodeHandler) UpdateEnabled(c *gin.Context) {
 		NotFoundResponse(c, "Edge Node 不存在")
 		return
 	}
+	// UpdateEnabled acquires the node row lock before committing. Settling
+	// after that commit prevents an authorization transaction that raced with
+	// the update from creating a job which the pre-check could not see.
+	if !req.Enabled && h.printJobRepo != nil {
+		activeCount, err := h.printJobRepo.CountActiveJobsByEdgeNodeID(c.Param("id"))
+		if err != nil {
+			logger.Error("Failed to count active jobs after disabling edge node", zap.String("node_id", c.Param("id")), zap.Error(err))
+			InternalErrorResponse(c, "检查活动任务失败")
+			return
+		}
+		if activeCount > 0 {
+			if err := h.settleActiveJobs(c.Param("id"), "edge_node_disabled"); err != nil {
+				logger.Error("Failed to settle active jobs after disabling edge node", zap.String("node_id", c.Param("id")), zap.Error(err))
+				InternalErrorResponse(c, "收敛活动任务失败")
+				return
+			}
+		}
+	}
 	if !req.Enabled && h.tokenUsageRepo != nil {
 		_, _ = h.tokenUsageRepo.RevokeTokensByNodeAndType("upload", c.Param("id"))
 	}
@@ -585,7 +637,7 @@ func (h *EdgeNodeHandler) DeleteEdgeNode(c *gin.Context) {
 		return
 	}
 
-	// 开始事务
+	// 开始事务。软删除提交后再收敛任务，避免并发授权在删除前提交而漏过预检查。
 	tx, err := h.db.BeginTx()
 	if err != nil {
 		logger.Error("Failed to begin transaction for deleting node", zap.String("node_id", nodeID), zap.Error(err))
@@ -667,6 +719,21 @@ func (h *EdgeNodeHandler) DeleteEdgeNode(c *gin.Context) {
 		return
 	}
 	committed = true
+	if h.printJobRepo != nil {
+		activeCount, err := h.printJobRepo.CountActiveJobsByEdgeNodeID(nodeID)
+		if err != nil {
+			logger.Error("Failed to count active jobs after deleting edge node", zap.String("node_id", nodeID), zap.Error(err))
+			InternalErrorResponse(c, "检查活动任务失败")
+			return
+		}
+		if activeCount > 0 {
+			if err := h.settleActiveJobs(nodeID, "edge_node_deleted"); err != nil {
+				logger.Error("Failed to settle active jobs after deleting edge node", zap.String("node_id", nodeID), zap.Error(err))
+				InternalErrorResponse(c, "收敛活动任务失败")
+				return
+			}
+		}
+	}
 
 	// 关闭该节点的 WebSocket 连接（如果存在）
 	// 这个操作在事务提交后执行，即使失败也不影响数据库操作

@@ -13,6 +13,26 @@ interface Printer {
   enabled: boolean; edge_node_id: string; job_count?: number;
 }
 
+export const PRINTER_STATUS_META: Record<string, { color: string; label: string }> = {
+  idle: { color: 'success', label: '就绪' },
+  printing: { color: 'processing', label: '打印中' },
+  printer_out_of_paper: { color: 'error', label: '缺纸' },
+  printer_out_of_toner: { color: 'error', label: '缺粉' },
+  printer_jammed: { color: 'error', label: '卡纸' },
+  printer_cover_open: { color: 'error', label: '机盖打开' },
+  printer_user_intervention: { color: 'error', label: '待处理' },
+  printer_other_fault: { color: 'error', label: '设备故障' },
+  printer_not_accepting_jobs: { color: 'warning', label: '拒绝新任务' },
+  printer_unconfirmed_lock: { color: 'warning', label: '待确认' },
+  printer_stopped: { color: 'error', label: '已停止' },
+  ipp_unreachable: { color: 'warning', label: '连接失败' },
+  error: { color: 'error', label: '异常' },
+  offline: { color: 'default', label: '离线' },
+  printer_state_unknown: { color: 'default', label: '未知' },
+};
+
+export const printerStatusLabel = (value: string) => PRINTER_STATUS_META[value]?.label || '未知状态';
+
 async function request(path: string, init?: RequestInit) {
   const me = await fetch(buildAuthUrl('me')); const token = (await me.json())?.data?.access_token;
   const response = await fetch(buildApiUrl(path), { ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers || {}) } });
@@ -21,12 +41,7 @@ async function request(path: string, init?: RequestInit) {
 }
 
 const stateTag = (value: string) => {
-  const states: Record<string, { color: string; label: string }> = {
-    idle: { color: 'success', label: '就绪' }, printing: { color: 'processing', label: '打印中' },
-    printer_stopped: { color: 'error', label: '已停止' }, error: { color: 'error', label: '异常' },
-    offline: { color: 'default', label: '离线' }, printer_state_unknown: { color: 'default', label: '未知' },
-  };
-  const state = states[value] || { color: 'default', label: value || '-' };
+  const state = PRINTER_STATUS_META[value] || { color: 'default', label: '未知状态' };
   return <Tag color={state.color}>{state.label}</Tag>;
 };
 
@@ -129,7 +144,7 @@ const Printers: React.FC = () => {
       width: 130,
       filters: [
         { text: '就绪', value: 'idle' }, { text: '打印中', value: 'printing' }, { text: '异常', value: 'error' },
-        { text: '离线', value: 'offline' }, { text: '已停止', value: 'printer_stopped' },
+        { text: '缺纸', value: 'printer_out_of_paper' }, { text: '离线', value: 'offline' }, { text: '已停止', value: 'printer_stopped' },
       ],
       onFilter: (value, record) => effectivePrinterStatus(record.printer_status, nodes[record.edge_node_id]?.connection_status) === value,
       render: (_, printer) => stateTag(effectivePrinterStatus(printer.printer_status, nodes[printer.edge_node_id]?.connection_status)),
@@ -148,7 +163,7 @@ const Printers: React.FC = () => {
           <Select allowClear placeholder="打印机状态" style={{ width: 140 }} value={statusFilter} onChange={setStatusFilter}
             options={[
               { value: 'idle', label: '就绪' }, { value: 'printing', label: '打印中' }, { value: 'error', label: '异常' },
-              { value: 'offline', label: '离线' }, { value: 'printer_stopped', label: '已停止' },
+              { value: 'printer_out_of_paper', label: '缺纸' }, { value: 'offline', label: '离线' }, { value: 'printer_stopped', label: '已停止' },
             ]} />
           <Select allowClear placeholder="启用状态" style={{ width: 120 }} value={enabledFilter} onChange={setEnabledFilter}
             options={[{ value: 'enabled', label: '已启用' }, { value: 'disabled', label: '已停用' }]} />

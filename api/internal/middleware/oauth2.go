@@ -18,15 +18,15 @@ type OAuth2TokenInfo struct {
 	NodeID            string   `json:"node_id,omitempty"`
 	PreferredUsername string   `json:"preferred_username"`
 	Email             string   `json:"email"`
-	Groups            []string `json:"groups,omitempty"`           // OIDC 标准 groups claim
-	Roles             []string `json:"roles,omitempty"`            // 常见 roles claim
-	Scope             string   `json:"scope,omitempty"`            // OAuth2 标准 scope
+	Groups            []string `json:"groups,omitempty"` // OIDC 标准 groups claim
+	Roles             []string `json:"roles,omitempty"`  // 常见 roles claim
+	Scope             string   `json:"scope,omitempty"`  // OAuth2 标准 scope
 	RealmAccess       struct {
 		Roles []string `json:"roles"`
-	} `json:"realm_access,omitempty"`                              // Keycloak realm roles
-	ResourceAccess    map[string]struct {
+	} `json:"realm_access,omitempty"` // Keycloak realm roles
+	ResourceAccess map[string]struct {
 		Roles []string `json:"roles"`
-	} `json:"resource_access,omitempty"`                           // Keycloak client roles
+	} `json:"resource_access,omitempty"` // Keycloak client roles
 }
 
 var oauth2ValidatorConfig struct {
@@ -57,12 +57,24 @@ func currentOAuth2Config() (*config.OAuth2Config, error) {
 // OAuth2ResourceServer OAuth2 资源服务器中间件（AND逻辑）
 // 验证 Bearer token 和 scope 权限，需要拥有所有指定权限
 func OAuth2ResourceServer(requiredScopes ...string) gin.HandlerFunc {
+	return oauth2ResourceServer(requiredScopes, false)
+}
+
+// OAuth2ResourceServerAny authorizes a token when it contains at least one of
+// the supplied scopes. It is used for operator/admin surfaces where either
+// role is sufficient; OAuth2ResourceServer intentionally keeps AND semantics
+// for endpoints that genuinely require every scope.
+func OAuth2ResourceServerAny(requiredScopes ...string) gin.HandlerFunc {
+	return oauth2ResourceServer(requiredScopes, true)
+}
+
+func oauth2ResourceServer(requiredScopes []string, anyScope bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 获取 Authorization header
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error":             "unauthorized", 
+				"error":             "unauthorized",
 				"error_description": "missing authorization header",
 			})
 			c.Abort()
@@ -103,9 +115,10 @@ func OAuth2ResourceServer(requiredScopes ...string) gin.HandlerFunc {
 
 		// 提取标准化角色
 		userRoles := extractStandardRoles(tokenInfo)
-		
+
 		// 验证权限
-		if !validateScopes(userRoles, requiredScopes) {
+		if (anyScope && !validateAnyScope(userRoles, requiredScopes)) ||
+			(!anyScope && !validateScopes(userRoles, requiredScopes)) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":             "insufficient_scope",
 				"error_description": "token does not have required scopes",
@@ -121,7 +134,7 @@ func OAuth2ResourceServer(requiredScopes ...string) gin.HandlerFunc {
 		c.Set("username", tokenInfo.PreferredUsername)
 		c.Set("email", tokenInfo.Email)
 		c.Set("roles", userRoles)
-		
+
 		c.Next()
 	}
 }
@@ -175,7 +188,7 @@ func parseJWTToken(tokenString string, cfg *config.OAuth2Config) (*OAuth2TokenIn
 
 func tokenInfoFromClaims(claims jwt.MapClaims) *OAuth2TokenInfo {
 	tokenInfo := &OAuth2TokenInfo{}
-	
+
 	// 提取标准 claims
 	if sub, ok := claims["sub"].(string); ok {
 		tokenInfo.Sub = sub
@@ -275,27 +288,27 @@ func validateTokenViaUserInfo(token, userInfoURL string) (*OAuth2TokenInfo, erro
 // extractStandardRoles 从多个标准位置提取用户角色
 func extractStandardRoles(tokenInfo *OAuth2TokenInfo) []string {
 	var allRoles []string
-	
+
 	// 1. OIDC 标准 groups claim
 	allRoles = append(allRoles, tokenInfo.Groups...)
-	
-	// 2. 常见 roles claim  
+
+	// 2. 常见 roles claim
 	allRoles = append(allRoles, tokenInfo.Roles...)
-	
+
 	// 3. Keycloak realm roles
 	allRoles = append(allRoles, tokenInfo.RealmAccess.Roles...)
-	
+
 	// 4. Keycloak client roles (从所有客户端)
 	for _, clientAccess := range tokenInfo.ResourceAccess {
 		allRoles = append(allRoles, clientAccess.Roles...)
 	}
-	
+
 	// 5. OAuth2 scope 转换为角色
 	if tokenInfo.Scope != "" {
 		scopeRoles := strings.Fields(tokenInfo.Scope)
 		allRoles = append(allRoles, scopeRoles...)
 	}
-	
+
 	// 去重
 	return removeDuplicates(allRoles)
 }
@@ -303,22 +316,25 @@ func extractStandardRoles(tokenInfo *OAuth2TokenInfo) []string {
 // HasRequiredScope 检查是否有必需的 scope（导出方法）
 func HasRequiredScope(tokenInfo *OAuth2TokenInfo, requiredScope string) bool {
 	// 从 scope 字符串中提取权限列表
-	scopes := strings.Fields(tokenInfo.Scope)
-	
+	if tokenInfo == nil {
+		return false
+	}
+	scopes := extractStandardRoles(tokenInfo)
+
 	// 检查是否包含所需的 scope
 	for _, scope := range scopes {
 		if scope == requiredScope {
 			return true
 		}
 	}
-	
+
 	// 检查 realm roles（某些情况下 scope 可能存储在 roles 中）
 	for _, role := range tokenInfo.RealmAccess.Roles {
 		if role == requiredScope {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -328,7 +344,7 @@ func validateScopes(userRoles []string, requiredScopes []string) bool {
 	if len(requiredScopes) == 0 {
 		return len(userRoles) > 0
 	}
-	
+
 	// admin 角色不隐式拥有所有权限：权限必须显式匹配 requiredScopes，
 	// 避免任意 Provider 发放名为 "admin" 的角色即获得全部管理能力。
 	// 检查是否包含所有必需的权限（AND逻辑）
@@ -340,12 +356,23 @@ func validateScopes(userRoles []string, requiredScopes []string) bool {
 	return true
 }
 
+func validateAnyScope(userRoles []string, requiredScopes []string) bool {
+	if len(requiredScopes) == 0 {
+		return len(userRoles) > 0
+	}
+	for _, requiredScope := range requiredScopes {
+		if contains(userRoles, requiredScope) {
+			return true
+		}
+	}
+	return false
+}
 
 // removeDuplicates 去除重复的角色
 func removeDuplicates(roles []string) []string {
 	keys := make(map[string]bool)
 	var result []string
-	
+
 	for _, role := range roles {
 		if role != "" && !keys[role] {
 			keys[role] = true
@@ -412,7 +439,7 @@ func OptionalOAuth2ResourceServer() gin.HandlerFunc {
 		c.Set("username", tokenInfo.PreferredUsername)
 		c.Set("email", tokenInfo.Email)
 		c.Set("roles", userRoles)
-		
+
 		c.Next()
 	}
 }

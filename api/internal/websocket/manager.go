@@ -23,22 +23,22 @@ type ConnectionManager struct {
 	TokenManager  *security.TokenManager // 凭证管理器
 	StatusService *operations.StatusService
 
-	occupiedMu      sync.Mutex
-	pendingOccupied map[string]*TerminalOccupiedPayload // node_id -> pending occupy until ACK
-	occupiedDispatchAt map[string]time.Time           // node_id -> last dispatch attempt time
+	occupiedMu          sync.Mutex
+	pendingOccupied     map[string]*TerminalOccupiedPayload // node_id -> pending occupy until ACK
+	occupiedDispatching map[string]bool                     // node_id -> ACK wait currently in flight
 }
 
 // NewConnectionManager 创建连接管理器
 func NewConnectionManager(tokenManager *security.TokenManager, statusService *operations.StatusService) *ConnectionManager {
 	return &ConnectionManager{
-		connections:     make(map[string]*Connection),
-		broadcast:       make(chan []byte),
-		register:        make(chan *Connection),
-		unregister:      make(chan *Connection),
-		TokenManager:    tokenManager,
-		StatusService:   statusService,
+		connections:         make(map[string]*Connection),
+		broadcast:           make(chan []byte),
+		register:            make(chan *Connection),
+		unregister:          make(chan *Connection),
+		TokenManager:        tokenManager,
+		StatusService:       statusService,
 		pendingOccupied:     make(map[string]*TerminalOccupiedPayload),
-		occupiedDispatchAt:  make(map[string]time.Time),
+		occupiedDispatching: make(map[string]bool),
 	}
 }
 
@@ -77,21 +77,29 @@ func (m *ConnectionManager) registerConnection(conn *Connection) {
 // unregisterConnection 注销连接
 func (m *ConnectionManager) unregisterConnection(conn *Connection) {
 	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
+	wasCurrent := false
 	if currentConn, exists := m.connections[conn.NodeID]; exists {
 		// 只有当要注销的连接是当前映射中的连接时才删除
 		// 避免新连接注册后，旧连接注销导致新连接被误删
 		if currentConn == conn {
 			delete(m.connections, conn.NodeID)
-			if m.StatusService != nil {
-				_ = m.StatusService.MarkUnstable(conn.NodeID)
-			}
+			wasCurrent = true
 			logger.Info("Edge Node disconnected", zap.String("node_id", conn.NodeID), zap.Int("total_connections", len(m.connections)))
 		} else {
 			logger.Debug("Ignored unregister request for replaced connection of node", zap.String("node_id", conn.NodeID))
 		}
 
+	}
+	m.mutex.Unlock()
+	if wasCurrent {
+		m.occupiedMu.Lock()
+		// A reconnect must be allowed to replay immediately; the old
+		// connection's ACK wait may otherwise suppress the replay window.
+		delete(m.occupiedDispatching, conn.NodeID)
+		m.occupiedMu.Unlock()
+		if m.StatusService != nil {
+			_ = m.StatusService.MarkUnstable(conn.NodeID)
+		}
 	}
 	conn.Close()
 }
@@ -269,9 +277,9 @@ func (m *ConnectionManager) ReplayTerminalOccupiedIfNeeded(nodeID string, payloa
 		m.mutex.RLock()
 		_, connected := m.connections[nodeID]
 		m.mutex.RUnlock()
-		lastDispatch, dispatched := m.occupiedDispatchAt[nodeID]
+		inFlight := m.occupiedDispatching[nodeID]
 		m.occupiedMu.Unlock()
-		if connected && !edgeHasTicket && (!dispatched || time.Since(lastDispatch) >= ackTimeout) {
+		if connected && !edgeHasTicket && !inFlight {
 			go m.dispatchTerminalOccupiedWithAck(nodeID, payload)
 		}
 		return
@@ -288,8 +296,17 @@ func (m *ConnectionManager) ReplayTerminalOccupiedIfNeeded(nodeID string, payloa
 
 func (m *ConnectionManager) dispatchTerminalOccupiedWithAck(nodeID string, payload TerminalOccupiedPayload) {
 	m.occupiedMu.Lock()
-	m.occupiedDispatchAt[nodeID] = time.Now()
+	if m.occupiedDispatching[nodeID] {
+		m.occupiedMu.Unlock()
+		return
+	}
+	m.occupiedDispatching[nodeID] = true
 	m.occupiedMu.Unlock()
+	defer func() {
+		m.occupiedMu.Lock()
+		delete(m.occupiedDispatching, nodeID)
+		m.occupiedMu.Unlock()
+	}()
 
 	m.mutex.RLock()
 	conn, exists := m.connections[nodeID]
@@ -432,7 +449,7 @@ func (m *ConnectionManager) dispatchPrintJob(nodeID string, job *models.PrintJob
 	if err != nil {
 		return err
 	}
-	if status != "" && status != "accepted" {
+	if status != "accepted" {
 		return ErrAckRejected
 	}
 	return nil

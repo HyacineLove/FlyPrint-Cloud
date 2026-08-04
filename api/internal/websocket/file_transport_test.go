@@ -128,7 +128,7 @@ func TestDispatchPrintJobIncludesContentHash(t *testing.T) {
 		if err := json.Unmarshal(<-conn.Send, &cmd); err == nil {
 			received <- cmd
 			conn.handleAckDirect(
-				&CommandAck{MsgID: cmd.MsgID, CommandID: cmd.CommandID},
+				&CommandAck{MsgID: cmd.MsgID, CommandID: cmd.CommandID, Status: "accepted"},
 			)
 		}
 	}()

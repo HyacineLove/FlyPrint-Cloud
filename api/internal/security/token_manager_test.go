@@ -74,6 +74,17 @@ func (r *testTokenRepo) RevokeTokensByNodeAndResource(tokenType, nodeID, resourc
 	return revoked, nil
 }
 
+func (r *testTokenRepo) RevokeTokensByNodeResourceAndJob(tokenType, nodeID, resourceID, jobID string) (int64, error) {
+	var revoked int64
+	for _, record := range r.records {
+		if record.tokenType == tokenType && record.nodeID == nodeID && record.resourceID == resourceID && record.jobID == jobID && !record.revoked {
+			record.revoked = true
+			revoked++
+		}
+	}
+	return revoked, nil
+}
+
 func (r *testTokenRepo) GetTokenStatus(tokenHash string) (bool, bool, bool, error) {
 	record, ok := r.records[tokenHash]
 	if !ok {
@@ -193,6 +204,26 @@ func TestGenerateTokensUseDynamicTTLProvider(t *testing.T) {
 	}
 	if got := downloadPayload.ExpiresAt - downloadPayload.IssuedAt; got != 75 {
 		t.Fatalf("download ttl = %d, want %d", got, 75)
+	}
+}
+
+func TestGenerateDownloadTokenDoesNotRevokeAnotherJobToken(t *testing.T) {
+	repo := newTestTokenRepo()
+	tm := NewTokenManager("secret", 180, 180, repo)
+
+	first, _, err := tm.GenerateDownloadToken("file-1", "job-1", "node-1")
+	if err != nil {
+		t.Fatalf("first token: %v", err)
+	}
+	second, _, err := tm.GenerateDownloadToken("file-1", "job-2", "node-1")
+	if err != nil {
+		t.Fatalf("second token: %v", err)
+	}
+	if _, err := tm.ValidateDownloadTokenSimple(first); err != nil {
+		t.Fatalf("job-1 token was revoked by job-2 token: %v", err)
+	}
+	if _, err := tm.ValidateDownloadTokenSimple(second); err != nil {
+		t.Fatalf("job-2 token should validate: %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package operations
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -181,20 +182,61 @@ func (s *StatusService) ApplyJobResult(jobID, nodeID, printerID, status, errorCo
 		return err
 	}
 	defer tx.Rollback()
+	var currentStatus, currentErrorCode, userID, ownerNodeID, ownerPrinterID string
+	var quotaReserved int64
+	var quotaConsumed sql.NullInt64
+	err = tx.QueryRow(`SELECT j.status,COALESCE(j.error_code,''),COALESCE(j.user_id::text,''),
+		j.quota_reserved,j.quota_consumed,j.printer_id::text,p.edge_node_id
+		FROM print_jobs j JOIN printers p ON p.id=j.printer_id
+		WHERE j.id=$1::uuid FOR UPDATE`, jobID).Scan(
+		&currentStatus, &currentErrorCode, &userID, &quotaReserved, &quotaConsumed, &ownerPrinterID, &ownerNodeID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+	if ownerNodeID != nodeID || ownerPrinterID != printerID {
+		return fmt.Errorf("job ownership mismatch")
+	}
+	allowFromUnconfirmed := currentStatus == "unconfirmed" &&
+		(currentErrorCode == "" || currentErrorCode == "dispatch_ack_timeout" || currentErrorCode == "print_timeout_unconfirmed")
+	if currentStatus == "completed" || currentStatus == "failed" || currentStatus == "canceled" ||
+		(currentStatus == "unconfirmed" && !allowFromUnconfirmed) {
+		return tx.Commit()
+	}
+
 	result, err := tx.Exec(`UPDATE print_jobs SET status=$2::varchar,
 		error_code=CASE WHEN $2::varchar IN ('processing','completed') THEN NULL ELSE NULLIF($3::varchar,'') END,
 		error_message=CASE WHEN $2::varchar IN ('processing','completed') THEN NULL WHEN NULLIF($4::varchar,'') IS NULL THEN error_message ELSE $4::varchar END,
 		updated_at=CURRENT_TIMESTAMP,end_time=CASE WHEN $2::varchar IN ('completed','failed','canceled','unconfirmed')
 		THEN COALESCE(end_time,CURRENT_TIMESTAMP) ELSE end_time END
-		WHERE id=$1::uuid AND (
-			status NOT IN ('completed','failed','canceled','unconfirmed') OR
-			(status='unconfirmed' AND error_code IN ('dispatch_ack_timeout','print_timeout_unconfirmed') AND $2::varchar IN ('processing','completed','failed','canceled','unconfirmed'))
-		)`, jobID, status, errorCode, errorMessage)
+		WHERE id=$1::uuid`, jobID, status, errorCode, errorMessage)
 	if err != nil {
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
 		return tx.Commit()
+	}
+	if (status == "failed" || status == "canceled") && quotaReserved > 0 && userID != "" {
+		consumed := int64(0)
+		if quotaConsumed.Valid {
+			consumed = quotaConsumed.Int64
+		}
+		refund := quotaReserved - consumed
+		if refund > 0 {
+			var balanceAfter int64
+			if err = tx.QueryRow(`UPDATE users SET print_quota_balance=print_quota_balance+$2
+				WHERE id=$1::uuid RETURNING print_quota_balance`, userID, refund).Scan(&balanceAfter); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(`INSERT INTO print_quota_transactions
+				(user_id,print_job_id,transaction_type,delta,balance_after)
+				VALUES ($1::uuid,$2::uuid,'settlement_refund',$3,$4)`, userID, jobID, refund, balanceAfter); err != nil {
+				return err
+			}
+		}
 	}
 	if status == "unconfirmed" {
 		if err = s.coordinator.OpenPrinterUnconfirmed(tx, printerID, nodeID, jobID, errorCode, details); err != nil {
@@ -202,6 +244,43 @@ func (s *StatusService) ApplyJobResult(jobID, nodeID, printerID, status, errorCo
 		}
 	}
 	return tx.Commit()
+}
+
+// CleanupStaleJobs resolves queued jobs through the same transactional path as
+// an explicit dispatch failure, so quota refunds and audit transactions cannot
+// be skipped by a background maintenance task.
+func (s *StatusService) CleanupStaleJobs(now time.Time, timeout time.Duration) (int64, error) {
+	rows, err := s.db.Query(`SELECT pj.id::text,p.edge_node_id,pj.printer_id::text
+		FROM print_jobs pj JOIN printers p ON p.id=pj.printer_id
+		WHERE pj.status IN ('pending','dispatched') AND pj.updated_at < $1`, now.Add(-timeout))
+	if err != nil {
+		return 0, err
+	}
+	type staleJob struct{ id, nodeID, printerID string }
+	jobs := make([]staleJob, 0)
+	for rows.Next() {
+		var job staleJob
+		if err := rows.Scan(&job.id, &job.nodeID, &job.printerID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	for _, job := range jobs {
+		if err := s.ApplyJobResult(job.id, job.nodeID, job.printerID, "failed", "print_timeout_failed", map[string]interface{}{
+			"message": "Edge node did not report status",
+		}); err != nil {
+			return int64(0), err
+		}
+	}
+	return int64(len(jobs)), nil
 }
 
 // ApplyTerminalJobUpdate atomically validates an Edge terminal report, applies
@@ -346,24 +425,31 @@ func (s *StatusService) ApplyTerminalJobUpdate(receipts *database.EdgeJobUpdateR
 	return TerminalJobUpdateResult{Accepted: true, Changed: true}, nil
 }
 
-func (s *StatusService) ApplyDispatchUnconfirmed(jobID, nodeID, printerID string) error {
+func (s *StatusService) ApplyDispatchUnconfirmed(jobID, nodeID, printerID string) (bool, error) {
 	tx, err := s.db.BeginTx()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 	result, err := tx.Exec(`UPDATE print_jobs SET status='unconfirmed',error_code='dispatch_ack_timeout',
 		error_message='无法确认边缘节点是否已接收任务',end_time=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
 		WHERE id=$1::uuid AND status='pending'`, jobID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if changed, _ := result.RowsAffected(); changed > 0 {
 		if err = s.coordinator.OpenPrinterUnconfirmed(tx, printerID, nodeID, jobID, "dispatch_ack_timeout", nil); err != nil {
-			return err
+			return false, err
 		}
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (s *StatusService) MarkUnstable(nodeID string) error {

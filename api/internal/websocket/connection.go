@@ -369,8 +369,14 @@ func (c *Connection) handleAckDirect(ack *CommandAck) {
 
 // SendCommandWithAck 发送指令并等待确认
 func (c *Connection) SendCommandWithAck(cmd *Command, timeout time.Duration) error {
-	_, err := c.SendCommandWithAckStatus(cmd, timeout)
-	return err
+	status, err := c.SendCommandWithAckStatus(cmd, timeout)
+	if err != nil {
+		return err
+	}
+	if status != "accepted" {
+		return ErrAckRejected
+	}
+	return nil
 }
 
 // SendCommandWithAckStatus 发送指令并等待确认，返回 ACK 的 status（accepted/rejected）。
@@ -462,8 +468,20 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 		if !created {
 			return
 		}
-		go DispatchPrintJobAndRecord(c.Manager, c.PrintJobRepo, c.StatusService, job, c.NodeID, func() error {
-			return c.IntegrationRequests.MarkDispatched(payload.IntegrationRequestID, job.ID)
+		go DispatchPrintJobAndRecordWithHooks(c.Manager, c.PrintJobRepo, c.StatusService, job, c.NodeID, DispatchHooks{
+			AfterDispatched: func() error {
+				return c.IntegrationRequests.MarkDispatched(payload.IntegrationRequestID, job.ID)
+			},
+			AfterFailure: func(errorCode, errorMessage string) error {
+				if c.Callbacks == nil {
+					return fmt.Errorf("integration callback repository unavailable")
+				}
+				status := "failed"
+				if errorCode == "dispatch_ack_timeout" {
+					status = "dispatched"
+				}
+				return c.Callbacks.TransitionForJob(job.ID, status, errorCode, errorMessage)
+			},
 		})
 		return
 	}
@@ -600,6 +618,13 @@ func optionInt(options map[string]interface{}, key string, fallback int) int {
 func optionString(options map[string]interface{}, key string) string {
 	value, _ := options[key].(string)
 	return value
+}
+
+func transitionIntegrationStatus(callbacks *database.IntegrationCallbackRepository, jobID, status, errorCode, errorMessage string) error {
+	if callbacks == nil {
+		return nil
+	}
+	return callbacks.TransitionForJob(jobID, status, errorCode, errorMessage)
 }
 
 func (c *Connection) handleHeartbeat(msg *Message) {
@@ -843,10 +868,13 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 			c.sendJobUpdateAck(jobData.EventID, jobData.JobID, "rejected", result.Reason)
 			return
 		}
-		if result.Changed && c.Callbacks != nil {
+		if result.Accepted && c.Callbacks != nil {
 			integrationStatus := map[string]string{"completed": "completed", "failed": "failed", "canceled": "cancelled", "unconfirmed": "failed"}[jobData.Status]
 			if integrationStatus != "" {
-				_ = c.Callbacks.TransitionForJob(jobData.JobID, integrationStatus, jobData.ErrorCode, errMsg)
+				if callbackErr := transitionIntegrationStatus(c.Callbacks, jobData.JobID, integrationStatus, jobData.ErrorCode, errMsg); callbackErr != nil {
+					logger.Error("Failed to persist integration terminal callback", zap.String("job_id", jobData.JobID), zap.Error(callbackErr))
+					return
+				}
 			}
 		}
 		c.sendJobUpdateAck(jobData.EventID, jobData.JobID, "accepted", "")
@@ -874,7 +902,9 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 	if c.Callbacks != nil {
 		integrationStatus := map[string]string{"processing": "printing", "completed": "completed", "failed": "failed", "canceled": "cancelled", "unconfirmed": "failed"}[jobData.Status]
 		if integrationStatus != "" {
-			_ = c.Callbacks.TransitionForJob(jobData.JobID, integrationStatus, jobData.ErrorCode, errMsg)
+			if callbackErr := transitionIntegrationStatus(c.Callbacks, jobData.JobID, integrationStatus, jobData.ErrorCode, errMsg); callbackErr != nil {
+				logger.Error("Failed to persist integration status callback", zap.String("job_id", jobData.JobID), zap.Error(callbackErr))
+			}
 		}
 	}
 

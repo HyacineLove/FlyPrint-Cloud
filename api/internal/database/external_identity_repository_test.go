@@ -68,6 +68,9 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		WHERE ticket_hash=$1 AND status='selected'`)).
 		WithArgs("ticket-hash", now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO portal_session_ready_outbox").
+		WithArgs(sqlmock.AnyArg(), "edge-1", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	completion, err := repo.CompleteLogin(CompletePortalLoginInput{
@@ -75,13 +78,15 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		TicketHash:     "ticket-hash",
 		ExternalUserID: "external-user-1",
 		DisplayName:    "张老师",
+		ClaimCode:      "claim-code-123",
+		ClaimExpiresAt: expiresAt,
 		Now:            now,
 	})
 	if err != nil {
 		t.Fatalf("CompleteLogin() error = %v", err)
 	}
 	if completion.NodeID != "edge-1" || completion.TerminalSessionID != "session-1" ||
-		completion.CloudUserID != "cloud-user-1" || completion.ClaimBaseURL != "https://portal.example.test" {
+		completion.CloudUserID != "cloud-user-1" || completion.ClaimBaseURL != "https://portal.example.test" || completion.ReadyEventID == "" {
 		t.Fatalf("unexpected completion: %#v", completion)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

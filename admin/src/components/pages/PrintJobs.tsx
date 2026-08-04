@@ -81,7 +81,8 @@ const PrintJobs: React.FC = () => {
   }, [page, edgeNodeFilter, printerFilter, initiatorFilter, userEmailFilter, statusFilter, keyword]);
 
   useEffect(() => { load(1); }, [edgeNodeFilter, printerFilter, initiatorFilter, userEmailFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { const timer = window.setInterval(() => { if (!document.hidden) load(); }, 30000); return () => window.clearInterval(timer); }, [load]);
+  // 打印任务通常在几十秒内完成；30 秒轮询会让 processing 状态经常被直接跳过。
+  useEffect(() => { const timer = window.setInterval(() => { if (!document.hidden) load(); }, 5000); return () => window.clearInterval(timer); }, [load]);
   const terminal = (status: string) => ['completed', 'failed', 'cancelled', 'canceled', 'unconfirmed'].includes(status);
 
   const columns: ColumnsType<PrintJob> = [

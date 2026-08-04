@@ -84,3 +84,41 @@ func TestReplayTerminalOccupiedDoesNotResendWhilePending(t *testing.T) {
 		t.Fatalf("pending occupy must remain while ACK outstanding, got %#v", pending)
 	}
 }
+
+func TestReplayTerminalOccupiedResendsAfterReconnect(t *testing.T) {
+	manager := NewConnectionManager(nil, nil)
+	connection := &Connection{
+		NodeID:      "node-5",
+		Send:        make(chan []byte, 1),
+		done:        make(chan struct{}),
+		pendingAcks: make(map[string]chan string),
+	}
+	manager.mutex.Lock()
+	manager.connections["node-5"] = connection
+	manager.mutex.Unlock()
+	payload := TerminalOccupiedPayload{
+		TerminalSessionID:  "session-5",
+		TerminalTicketHash: "cc33",
+		ExpiresAt:          time.Now().Add(time.Minute),
+	}
+	manager.occupiedMu.Lock()
+	manager.pendingOccupied["node-5"] = &payload
+	manager.occupiedMu.Unlock()
+
+	manager.ReplayTerminalOccupiedIfNeeded("node-5", payload, false)
+	select {
+	case <-connection.Send:
+		connection.ackMutex.Lock()
+		var msgID string
+		for id := range connection.pendingAcks {
+			msgID = id
+		}
+		connection.ackMutex.Unlock()
+		if msgID == "" {
+			t.Fatal("expected replayed command to wait for ACK")
+		}
+		connection.handleAckDirect(&CommandAck{MsgID: msgID, Status: "accepted"})
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected terminal_occupied to be replayed after reconnect")
+	}
+}

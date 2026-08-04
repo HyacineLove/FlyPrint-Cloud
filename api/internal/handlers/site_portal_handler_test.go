@@ -65,6 +65,16 @@ type fakePortalReadyDispatcher struct {
 	err       error
 }
 
+type fakePortalReadyOutbox struct {
+	ids []string
+	err error
+}
+
+func (f *fakePortalReadyOutbox) MarkDelivered(eventID string) error {
+	f.ids = append(f.ids, eventID)
+	return f.err
+}
+
 func (f *fakePortalReadyDispatcher) IsNodeConnected(_ string) bool {
 	return f.connected
 }
@@ -173,9 +183,13 @@ func TestSitePortalLoginCompletionMapsUserThenSendsCredentialFreeReadyMessage(t 
 	}
 }
 
-func TestSitePortalLoginCompletionDoesNotConsumeTicketWhenEdgeIsOffline(t *testing.T) {
+func TestSitePortalLoginCompletionPersistsNotificationWhenEdgeIsOffline(t *testing.T) {
 	selected := "official"
-	completer := &fakePortalLoginCompleter{err: errors.New("must not be called")}
+	completer := &fakePortalLoginCompleter{completion: &models.PortalLoginCompletion{
+		NodeID: "edge-1", TerminalSessionID: "session-1", CloudUserID: "cloud-user-1",
+		SitePortalCode: "official", ClaimBaseURL: "https://portal.example.test", ReadyEventID: "event-1",
+	}}
+	outbox := &fakePortalReadyOutbox{}
 	handler := NewSitePortalHandler(
 		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official"}},
 		&fakePortalTicketReader{ticket: &models.TerminalTicket{
@@ -184,7 +198,8 @@ func TestSitePortalLoginCompletionDoesNotConsumeTicketWhenEdgeIsOffline(t *testi
 		}},
 		&fakePortalSessionMatcher{matched: true},
 		completer,
-		&fakePortalReadyDispatcher{connected: false},
+		&fakePortalReadyDispatcher{connected: false, err: errors.New("edge offline")},
+		outbox,
 	)
 
 	recorder := sitePortalRequest(t, newSitePortalTestRouter(handler), "/login-completions", map[string]any{
@@ -195,10 +210,46 @@ func TestSitePortalLoginCompletionDoesNotConsumeTicketWhenEdgeIsOffline(t *testi
 		"claim_expires_at": time.Now().Add(4 * time.Minute),
 	})
 
-	if recorder.Code != http.StatusServiceUnavailable {
+	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
 	}
-	if completer.calls != 0 {
-		t.Fatalf("offline Edge should not consume ticket: calls=%d", completer.calls)
+	if completer.calls != 1 || len(outbox.ids) != 0 {
+		t.Fatalf("offline Edge must leave durable notification pending: calls=%d ids=%v", completer.calls, outbox.ids)
+	}
+}
+
+func TestSitePortalLoginCompletionKeepsDurableNotificationPendingWhenDispatchFails(t *testing.T) {
+	now := time.Now().UTC()
+	selected := "official"
+	completer := &fakePortalLoginCompleter{completion: &models.PortalLoginCompletion{
+		NodeID: "edge-1", TerminalSessionID: "session-1", CloudUserID: "cloud-user-1",
+		SitePortalCode: "official", ClaimBaseURL: "https://portal.example.test", ReadyEventID: "event-1",
+	}}
+	outbox := &fakePortalReadyOutbox{}
+	handler := NewSitePortalHandler(
+		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official"}},
+		&fakePortalTicketReader{ticket: &models.TerminalTicket{
+			NodeID: "edge-1", TerminalSessionID: "session-1", TicketHash: "ticket-hash",
+			SelectedEntry: &selected, ExpiresAt: now.Add(time.Minute),
+		}},
+		&fakePortalSessionMatcher{matched: true},
+		completer,
+		&fakePortalReadyDispatcher{connected: true, err: errors.New("websocket send failed")},
+		outbox,
+	)
+
+	recorder := sitePortalRequest(t, newSitePortalTestRouter(handler), "/login-completions", map[string]any{
+		"terminal_ticket":  "raw-ticket",
+		"external_user_id": "external-user-1",
+		"display_name":     "张老师",
+		"claim_code":       "claim-code-1",
+		"claim_expires_at": now.Add(4 * time.Minute),
+	})
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
+	}
+	if len(outbox.ids) != 0 {
+		t.Fatalf("failed dispatch must remain pending, marked ids=%v", outbox.ids)
 	}
 }

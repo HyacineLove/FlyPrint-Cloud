@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"fly-print-cloud/api/internal/models"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -26,6 +28,8 @@ type CompletePortalLoginInput struct {
 	TicketHash     string
 	ExternalUserID string
 	DisplayName    string
+	ClaimCode      string
+	ClaimExpiresAt time.Time
 	Now            time.Time
 }
 
@@ -170,6 +174,27 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 	if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
 		return nil, ErrPortalLoginTicketInvalid
 	}
+	readyEventID := ""
+	if input.ClaimCode != "" && !input.ClaimExpiresAt.IsZero() {
+		payload, marshalErr := json.Marshal(map[string]interface{}{
+			"site_portal_code":    input.SitePortalCode,
+			"claim_base_url":      claimBaseURL,
+			"claim_code":          input.ClaimCode,
+			"terminal_session_id": terminalSessionID,
+			"cloud_user_id":       cloudUserID,
+			"expires_at":          input.ClaimExpiresAt,
+		})
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshal portal ready payload: %w", marshalErr)
+		}
+		readyEventID = uuid.NewString()
+		if _, err = tx.Exec(`INSERT INTO portal_session_ready_outbox
+			(id,node_id,payload,status,attempt_count,next_attempt_at)
+			VALUES ($1::uuid,$2,$3::jsonb,'pending',0,CURRENT_TIMESTAMP)`,
+			readyEventID, nodeID, payload); err != nil {
+			return nil, fmt.Errorf("enqueue portal ready event: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -179,5 +204,6 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		CloudUserID:       cloudUserID,
 		SitePortalCode:    input.SitePortalCode,
 		ClaimBaseURL:      claimBaseURL,
+		ReadyEventID:      readyEventID,
 	}, nil
 }

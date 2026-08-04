@@ -14,6 +14,10 @@ type PrintJobRepository struct {
 	db *DB
 }
 
+type ActivePrintJobRef struct {
+	ID, PrinterID, EdgeNodeID string
+}
+
 func NewPrintJobRepository(db *DB) *PrintJobRepository {
 	return &PrintJobRepository{db: db}
 }
@@ -58,10 +62,11 @@ func (r *PrintJobRepository) CreatePrintJob(job *models.PrintJob) error {
 func (r *PrintJobRepository) GetPrintJobByID(id string) (*models.PrintJob, error) {
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id,
-			   pj.user_id, COALESCE(NULLIF(u.username, ''), pj.user_name, ''), COALESCE(u.email, ''), file_path, file_url, content_hash, file_size, page_count,
-			   copies, paper_size, color_mode, duplex_mode, 
-			   start_time, end_time, COALESCE(error_message, ''), retry_count,
-			   max_retries, created_at, updated_at
+			   pj.user_id, COALESCE(NULLIF(u.username, ''), pj.user_name, ''), COALESCE(u.email, ''),
+			   pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
+			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode,
+			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.retry_count,
+			   pj.max_retries, pj.created_at, pj.updated_at
 		FROM print_jobs pj LEFT JOIN users u ON u.id::text = pj.user_id WHERE pj.id = $1`
 
 	job := &models.PrintJob{}
@@ -313,7 +318,7 @@ func (r *PrintJobRepository) GetPrintJobsByUserID(userID string, limit, offset i
 func (r *PrintJobRepository) GetPendingOrDispatchedJobsByEdgeNodeID(edgeNodeID string) ([]*models.PrintJob, error) {
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id, p.name,
-			   pj.user_id, pj.user_name, pj.file_path, pj.file_url, pj.content_hash, pj.file_size, pj.page_count, 
+			   pj.user_id, pj.user_name, pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
 			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode, 
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at
@@ -520,6 +525,68 @@ func (r *PrintJobRepository) CountActiveJobsByPrinter(printerID string) (int, er
 	return count, nil
 }
 
+// CountActiveJobsByEdgeNodeID counts jobs that still depend on a node.  The
+// node/printer lifecycle handlers use this guard before disabling or deleting
+// infrastructure, so an active job cannot be orphaned by a destructive
+// metadata operation.
+func (r *PrintJobRepository) CountActiveJobsByEdgeNodeID(edgeNodeID string) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM print_jobs pj
+		JOIN printers p ON p.id = pj.printer_id
+		WHERE p.edge_node_id = $1
+		  AND pj.status IN ('pending', 'dispatched', 'processing')`
+
+	var count int
+	if err := r.db.DB.QueryRow(query, edgeNodeID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count active jobs by edge node: %w", err)
+	}
+	return count, nil
+}
+
+// ListActiveJobRefsByEdgeNodeID returns only the ownership fields required by
+// lifecycle settlement. Keeping this query small avoids loading document
+// metadata while a node or printer is being disabled/deleted.
+func (r *PrintJobRepository) ListActiveJobRefsByEdgeNodeID(edgeNodeID string) ([]ActivePrintJobRef, error) {
+	rows, err := r.db.DB.Query(`SELECT pj.id::text,pj.printer_id::text,p.edge_node_id
+		FROM print_jobs pj JOIN printers p ON p.id=pj.printer_id
+		WHERE p.edge_node_id=$1 AND pj.status IN ('pending','dispatched','processing')
+		ORDER BY pj.created_at`, edgeNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active jobs by edge node: %w", err)
+	}
+	defer rows.Close()
+	refs := make([]ActivePrintJobRef, 0)
+	for rows.Next() {
+		var ref ActivePrintJobRef
+		if err := rows.Scan(&ref.ID, &ref.PrinterID, &ref.EdgeNodeID); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+func (r *PrintJobRepository) ListActiveJobRefsByPrinterID(printerID string) ([]ActivePrintJobRef, error) {
+	rows, err := r.db.DB.Query(`SELECT pj.id::text,pj.printer_id::text,p.edge_node_id
+		FROM print_jobs pj JOIN printers p ON p.id=pj.printer_id
+		WHERE pj.printer_id=$1::uuid AND pj.status IN ('pending','dispatched','processing')
+		ORDER BY pj.created_at`, printerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active jobs by printer: %w", err)
+	}
+	defer rows.Close()
+	refs := make([]ActivePrintJobRef, 0)
+	for rows.Next() {
+		var ref ActivePrintJobRef
+		if err := rows.Scan(&ref.ID, &ref.PrinterID, &ref.EdgeNodeID); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
 // CleanupStaleJobs 标记长时间未更新的“打印中”任务为失败
 func (r *PrintJobRepository) CleanupStaleJobs(timeout time.Duration) (int64, error) {
 	query := `
@@ -570,7 +637,7 @@ func (r *PrintJobRepository) ListPrintJobsWithTotal(limit, offset int, status, p
 func (r *PrintJobRepository) GetPendingJobsForRetry(minAge time.Duration) ([]*models.PrintJob, error) {
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id, p.name as printer_name, p.edge_node_id,
-			   pj.user_id, pj.user_name, pj.file_path, pj.file_url, pj.content_hash, pj.file_size, pj.page_count,
+			   pj.user_id, pj.user_name, pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
 			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode,
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at

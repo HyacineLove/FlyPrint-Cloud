@@ -32,17 +32,21 @@ type portalLoginCompleter interface {
 }
 
 type portalReadyDispatcher interface {
-	IsNodeConnected(nodeID string) bool
 	DispatchPortalSessionReady(nodeID string, payload websocket.PortalSessionReadyPayload) error
 }
 
+type portalReadyOutbox interface {
+	MarkDelivered(eventID string) error
+}
+
 type SitePortalHandler struct {
-	portals    sitePortalAuthenticator
-	tickets    portalTicketReader
-	sessions   portalSessionMatcher
-	identities portalLoginCompleter
-	dispatcher portalReadyDispatcher
-	now        func() time.Time
+	portals     sitePortalAuthenticator
+	tickets     portalTicketReader
+	sessions    portalSessionMatcher
+	identities  portalLoginCompleter
+	dispatcher  portalReadyDispatcher
+	readyOutbox portalReadyOutbox
+	now         func() time.Time
 }
 
 func NewSitePortalHandler(
@@ -51,10 +55,15 @@ func NewSitePortalHandler(
 	sessions portalSessionMatcher,
 	identities portalLoginCompleter,
 	dispatcher portalReadyDispatcher,
+	readyOutboxes ...portalReadyOutbox,
 ) *SitePortalHandler {
+	var readyOutbox portalReadyOutbox
+	if len(readyOutboxes) > 0 {
+		readyOutbox = readyOutboxes[0]
+	}
 	return &SitePortalHandler{
 		portals: portals, tickets: tickets, sessions: sessions,
-		identities: identities, dispatcher: dispatcher, now: time.Now,
+		identities: identities, dispatcher: dispatcher, readyOutbox: readyOutbox, now: time.Now,
 	}
 }
 
@@ -148,16 +157,13 @@ func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "terminal_session_invalid"})
 		return
 	}
-	if !h.dispatcher.IsNodeConnected(ticket.NodeID) {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "edge_not_connected"})
-		return
-	}
-
 	completion, err := h.identities.CompleteLogin(database.CompletePortalLoginInput{
 		SitePortalCode: portal.Code,
 		TicketHash:     ticket.TicketHash,
 		ExternalUserID: input.ExternalUserID,
 		DisplayName:    input.DisplayName,
+		ClaimCode:      input.ClaimCode,
+		ClaimExpiresAt: input.ClaimExpiresAt,
 		Now:            now,
 	})
 	if err != nil {
@@ -181,8 +187,18 @@ func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
 		ExpiresAt:         input.ClaimExpiresAt,
 	}
 	if err := h.dispatcher.DispatchPortalSessionReady(completion.NodeID, payload); err != nil {
+		if completion.ReadyEventID != "" && h.readyOutbox != nil {
+			c.JSON(http.StatusAccepted, gin.H{"cloud_user_id": completion.CloudUserID, "notification_pending": true})
+			return
+		}
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "edge_notification_failed"})
 		return
+	}
+	if completion.ReadyEventID != "" && h.readyOutbox != nil {
+		if err := h.readyOutbox.MarkDelivered(completion.ReadyEventID); err != nil {
+			c.JSON(http.StatusAccepted, gin.H{"cloud_user_id": completion.CloudUserID, "notification_pending": true})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"cloud_user_id": completion.CloudUserID})
 }

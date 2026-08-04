@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
@@ -106,6 +107,7 @@ func main() {
 	userRepo := database.NewUserRepository(db)
 	sitePortalRepo := database.NewSitePortalRepository(db)
 	externalIdentityRepo := database.NewExternalIdentityRepository(db)
+	portalReadyOutboxRepo := database.NewPortalSessionReadyOutboxRepository(db)
 	if cfg.SitePortalBootstrap.Code != "" {
 		if err := sitePortalRepo.UpsertBootstrap(&models.SitePortal{
 			Code:         cfg.SitePortalBootstrap.Code,
@@ -163,10 +165,11 @@ func main() {
 	// 启动文件清理任务（定期删除1天前的文件）
 	go startFileCleanupTask(fileRepo, cfg.Storage)
 	// 启动打印任务状态清理任务（每30分钟检查一次超时任务）
-	go startStaleJobCleanupTask(printJobRepo)
+	go startStaleJobCleanupTask(statusService)
 
 	// 初始化 WebSocket 管理器
 	wsManager := websocket.NewConnectionManager(tokenManager, statusService)
+	go startPortalReadyOutboxTask(context.Background(), portalReadyOutboxRepo, wsManager)
 	integrationTerminalDispatcher := integration.NewTerminalDispatcher(integrationRequestRepo, database.NewTerminalSessionRepository(db), fileRepo, printerRepo, wsManager)
 	go integrationTerminalDispatcher.Run(context.Background())
 	jobUpdateReceiptRepo := database.NewEdgeJobUpdateReceiptRepository(db)
@@ -232,8 +235,8 @@ func main() {
 
 	// 初始化处理器
 	userHandler := handlers.NewUserHandler(userRepo, printQuotaRepo)
-	edgeNodeHandler := handlers.NewEdgeNodeHandler(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, integrationRequestRepo, opsContactRepo, integrationProviderRepo)
-	printerHandler := handlers.NewPrinterHandler(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo)
+	edgeNodeHandler := handlers.NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, integrationRequestRepo, opsContactRepo, integrationProviderRepo, statusService, integrationCallbackRepo)
+	printerHandler := handlers.NewPrinterHandlerWithCallbacks(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo, integrationCallbackRepo)
 	printJobHandler := handlers.NewPrintJobHandler(printJobRepo, printerRepo, edgeNodeRepo, wsManager, statusService, alertRepo)
 	portalPrintHandler := handlers.NewPortalPrintHandler(printAuthorizationRepo)
 	oauth2Handler := handlers.NewOAuth2Handler(&cfg.OAuth2, &cfg.Admin, userRepo, builtinAuth)
@@ -241,7 +244,7 @@ func main() {
 	fileHandler.SetTerminalUploadSessionBinder(terminalUploadSessions)
 	fileHandler.SetTerminalSessionMatcher(terminalSessionRepo)
 	terminalTicketHandler := handlers.NewTerminalTicketHandler(terminalTicketRepo, printerRepo, edgeNodeRepo, integrationProviderRepo, terminalUploadSessions, tokenManager, wsManager, terminalSessionRepo, sitePortalRepo)
-	sitePortalHandler := handlers.NewSitePortalHandler(sitePortalRepo, terminalTicketRepo, terminalSessionRepo, externalIdentityRepo, wsManager)
+	sitePortalHandler := handlers.NewSitePortalHandler(sitePortalRepo, terminalTicketRepo, terminalSessionRepo, externalIdentityRepo, wsManager, portalReadyOutboxRepo)
 	integrationProviderHandler := handlers.NewIntegrationProviderHandler(integrationProviderRepo, printJobRepo, oauth2SecretCipher, cfg.Integration.RedisURL)
 	integrationPrintRequestHandler := handlers.NewIntegrationPrintRequestHandler(integrationProviderRepo, integrationRequestRepo, oauth2SecretCipher, integrationNonceStore)
 	businessSettingsHandler := handlers.NewBusinessSettingsHandler(businessSettingsService)
@@ -356,12 +359,12 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 		adminGroup := apiV1Group.Group("/admin")
 		{
 			// Dashboard 路由 - 需要 admin 或 operator 权限
-			dashboardGroup := adminGroup.Group("/dashboard", middleware.OAuth2ResourceServer("fly-print-admin", "fly-print-operator"))
+			dashboardGroup := adminGroup.Group("/dashboard", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"))
 			{
 				dashboardHandler := handlers.NewDashboardHandler(printJobRepo, alertRepo)
 				dashboardGroup.GET("/trends", dashboardHandler.GetTrends)
 				dashboardGroup.GET("/maintenance", dashboardHandler.GetMaintenance)
-				adminGroup.GET("/alerts/history", middleware.OAuth2ResourceServer("fly-print-admin", "fly-print-operator"), dashboardHandler.GetAlertHistory)
+				adminGroup.GET("/alerts/history", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"), dashboardHandler.GetAlertHistory)
 			}
 
 			// 当前用户业务信息 - 任何认证用户都可以访问自己的档案
@@ -397,7 +400,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 				integrationProviderGroup.POST("/:code/rotate-secret", integrationProviderHandler.Rotate)
 			}
 
-			opsContactGroup := adminGroup.Group("/ops-contacts", middleware.OAuth2ResourceServer("fly-print-admin", "fly-print-operator"))
+			opsContactGroup := adminGroup.Group("/ops-contacts", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"))
 			{
 				opsContactGroup.GET("", opsContactHandler.List)
 				opsContactGroup.POST("", opsContactHandler.Create)
@@ -409,7 +412,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 			}
 
 			// Edge Node 管理路由 - 需要 admin 或 operator 权限
-			edgeNodeGroup := adminGroup.Group("/edge-nodes", middleware.OAuth2ResourceServer("fly-print-admin", "fly-print-operator"))
+			edgeNodeGroup := adminGroup.Group("/edge-nodes", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"))
 			{
 				edgeNodeGroup.GET("", edgeNodeHandler.ListEdgeNodes)
 				if edgeActivationHandler != nil {
@@ -423,7 +426,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 			}
 
 			// 打印机管理路由 - 需要 admin 或 operator 权限
-			printerGroup := adminGroup.Group("/printers", middleware.OAuth2ResourceServer("fly-print-admin", "fly-print-operator"))
+			printerGroup := adminGroup.Group("/printers", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"))
 			{
 				printerGroup.GET("", printerHandler.ListPrinters)
 				printerGroup.GET("/:id", printerHandler.GetPrinter)
@@ -432,7 +435,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 			}
 
 			// 打印任务只读；任务状态由打印链路驱动，不能从管理端重试或改写。
-			printJobGroup := adminGroup.Group("/print-jobs", middleware.OAuth2ResourceServer("fly-print-admin", "fly-print-operator"))
+			printJobGroup := adminGroup.Group("/print-jobs", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"))
 			{
 				printJobGroup.GET("", printJobHandler.ListPrintJobs)
 				printJobGroup.GET("/:id", printJobHandler.GetPrintJob)
@@ -551,14 +554,14 @@ func startFileCleanupTask(fileRepo *database.FileRepository, storageCfg config.S
 
 // startStaleJobCleanupTask 启动打印任务状态清理任务
 // 每30分钟扫描一次，将超过30分钟未更新的“打印中”任务标记为失败
-func startStaleJobCleanupTask(printJobRepo *database.PrintJobRepository) {
+func startStaleJobCleanupTask(statusService *operations.StatusService) {
 	ticker := time.NewTicker(30 * time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		// 30分钟超时
 		timeout := 30 * time.Minute
-		affected, err := printJobRepo.CleanupStaleJobs(timeout)
+		affected, err := statusService.CleanupStaleJobs(time.Now(), timeout)
 		if err != nil {
 			logger.Error("Stale job cleanup error", zap.Error(err))
 			continue
@@ -566,6 +569,45 @@ func startStaleJobCleanupTask(printJobRepo *database.PrintJobRepository) {
 
 		if affected > 0 {
 			logger.Info("Stale job cleanup completed", zap.Int64("affected", affected))
+		}
+	}
+}
+
+func startPortalReadyOutboxTask(ctx context.Context, repo *database.PortalSessionReadyOutboxRepository, dispatcher *websocket.ConnectionManager) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			for {
+				event, err := repo.ClaimDue(now)
+				if err != nil {
+					logger.Error("Portal session-ready outbox claim failed", zap.Error(err))
+					break
+				}
+				if event == nil {
+					break
+				}
+				var payload websocket.PortalSessionReadyPayload
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					logger.Error("Portal session-ready outbox payload invalid", zap.String("event_id", event.ID), zap.Error(err))
+					_ = repo.Retry(event.ID, event.AttemptCount, err.Error(), now)
+					continue
+				}
+				if !dispatcher.IsNodeConnected(event.NodeID) {
+					_ = repo.Retry(event.ID, event.AttemptCount, "edge_not_connected", now)
+					continue
+				}
+				if err := dispatcher.DispatchPortalSessionReady(event.NodeID, payload); err != nil {
+					_ = repo.Retry(event.ID, event.AttemptCount, err.Error(), now)
+					continue
+				}
+				if err := repo.MarkDelivered(event.ID); err != nil {
+					logger.Error("Portal session-ready outbox completion failed", zap.String("event_id", event.ID), zap.Error(err))
+				}
+			}
 		}
 	}
 }
