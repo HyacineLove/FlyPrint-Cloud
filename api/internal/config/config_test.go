@@ -71,7 +71,8 @@ func TestValidateSitePortalBootstrapAcceptsExplicitConfiguration(t *testing.T) {
 		DisplayName:  "FlyPrint",
 		EntryURL:     "https://portal.example.test/entry",
 		ClaimBaseURL: "https://portal.example.test",
-		APIToken:     "12345678901234567890123456789012",
+		OAuthClientID: "site-portal-official",
+		OAuthClientSecret: "12345678901234567890123456789012",
 	}
 
 	if err := cfg.Validate(); err != nil {

@@ -108,14 +108,30 @@ func (s *BuiltinAuthService) handleClientCredentials(clientID, clientSecret, req
 			return nil, fmt.Errorf("invalid_client: edge node is disabled or deleted")
 		}
 	}
+	if client.ClientType == "site_portal" {
+		if client.SitePortalCode == nil || *client.SitePortalCode == "" {
+			return nil, fmt.Errorf("invalid_client: site_portal client is not bound to a portal")
+		}
+		usable, err := s.clientRepo.IsBoundSitePortalUsable(client.ClientID)
+		if err != nil {
+			return nil, fmt.Errorf("server_error: failed to verify site portal state")
+		}
+		if !usable {
+			return nil, fmt.Errorf("invalid_client: site portal is disabled")
+		}
+	}
 
-	// Device credentials carry the immutable node claim. Human and third-party
+	// Device credentials carry the immutable node claim. Human and Site Portal
 	// client credentials never acquire a node identity.
 	nodeID := ""
 	if client.EdgeNodeID != nil {
 		nodeID = *client.EdgeNodeID
 	}
-	tokenString, expiresIn, err := s.GenerateJWTForNode(client.ClientID, client.ClientID, client.ClientID+"@edge.local", grantedScope, nodeID)
+	portalCode := ""
+	if client.SitePortalCode != nil {
+		portalCode = *client.SitePortalCode
+	}
+	tokenString, expiresIn, err := s.GenerateJWTForClient(client.ClientID, client.ClientID, client.ClientID+"@service.local", grantedScope, nodeID, client.ClientType, portalCode)
 	if err != nil {
 		return nil, fmt.Errorf("server_error: failed to generate token")
 	}
@@ -170,6 +186,29 @@ func (s *BuiltinAuthService) handlePasswordGrant(email, password, requestedScope
 // GenerateJWT 生成 JWT token
 func (s *BuiltinAuthService) GenerateJWT(sub, username, email, scope string) (string, int64, error) {
 	return s.GenerateJWTForNode(sub, username, email, scope, "")
+}
+
+func (s *BuiltinAuthService) GenerateJWTForClient(sub, username, email, scope, nodeID, clientType, sitePortalCode string) (string, int64, error) {
+	now := time.Now()
+	expiresIn := int64(s.tokenExpiry)
+	claims := jwt.MapClaims{
+		"sub": sub, "preferred_username": username, "email": email, "scope": scope,
+		"client_type": clientType, "iss": s.issuer, "iat": now.Unix(),
+		"exp": now.Add(time.Duration(s.tokenExpiry) * time.Second).Unix(),
+		"realm_access": map[string]interface{}{"roles": strings.Fields(scope)},
+	}
+	if nodeID != "" {
+		claims["node_id"] = nodeID
+	}
+	if sitePortalCode != "" {
+		claims["site_portal_code"] = sitePortalCode
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(s.signingSecret)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to sign token: %w", err)
+	}
+	return tokenString, expiresIn, nil
 }
 
 // GenerateJWTForNode emits a signed device token. nodeID is intentionally

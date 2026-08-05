@@ -29,12 +29,10 @@ type WebSocketHandler struct {
 	terminalSessions    *database.TerminalSessionRepository
 	terminalTickets     *database.TerminalTicketRepository
 	uploadSessions      *database.TerminalUploadSessionRepository
-	callbacks           *database.IntegrationCallbackRepository
-	integrationRequests *database.IntegrationPrintRequestRepository
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器
-func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, allowedOrigins []string, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, callbacks *database.IntegrationCallbackRepository, integrationRequests *database.IntegrationPrintRequestRepository) *WebSocketHandler {
+func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, allowedOrigins []string, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository) *WebSocketHandler {
 	return &WebSocketHandler{
 		manager:             manager,
 		printerRepo:         printerRepo,
@@ -48,8 +46,6 @@ func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.Print
 		terminalSessions:    terminalSessions,
 		terminalTickets:     terminalTickets,
 		uploadSessions:      uploadSessions,
-		callbacks:           callbacks,
-		integrationRequests: integrationRequests,
 	}
 }
 
@@ -148,7 +144,7 @@ func (h *WebSocketHandler) HandleConnection(c *gin.Context) {
 	}
 
 	// 创建连接对象
-	connection := NewConnection(nodeID, conn, h.manager, h.printerRepo, h.edgeNodeRepo, h.printJobRepo, h.fileRepo, h.tokenManager, h.statusService, h.receipts, h.terminalSessions, h.terminalTickets, h.uploadSessions, h.callbacks, h.integrationRequests)
+	connection := NewConnection(nodeID, conn, h.manager, h.printerRepo, h.edgeNodeRepo, h.printJobRepo, h.fileRepo, h.tokenManager, h.statusService, h.receipts, h.terminalSessions, h.terminalTickets, h.uploadSessions)
 
 	// 注册连接
 	h.manager.register <- connection

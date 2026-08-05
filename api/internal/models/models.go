@@ -102,14 +102,14 @@ type PrintJob struct {
 	PrinterName    string `json:"printer_name,omitempty"` // 打印机名称 (非DB字段，仅用于API返回或内部逻辑)
 	EdgeNodeID     string `json:"edge_node_id,omitempty"` // 所属节点ID（查询时填充）
 	NodeName       string `json:"node_name,omitempty"`    // 节点显示名称（别名优先）
-	UserID         string `json:"user_id"`                // 提交用户（内部兼容主键或第三方标识）
+	UserID         string `json:"user_id"`                // 提交用户（官方用户或 Site Portal 映射用户）
 	UserName       string `json:"user_name"`              // 提交用户名
 	UserEmail      string `json:"user_email,omitempty"`   // 提交用户邮箱（官方用户的稳定业务标识）
 	SitePortalCode string `json:"site_portal_code,omitempty"`
 
 	// 任务信息
 	FilePath    string `json:"file_path"`    // 文件路径（本地文件）
-	FileURL     string `json:"file_url"`     // 文件URL（第三方API使用）
+	FileURL     string `json:"file_url"`     // 文件 URL（内部任务引用）
 	ContentHash string `json:"content_hash"` // file sha256 content hash
 	FileSize    int64  `json:"file_size"`    // 文件大小
 	PageCount   int    `json:"page_count"`   // 页数
@@ -134,13 +134,10 @@ type PrintJob struct {
 	RetryCount int `json:"retry_count"`
 	MaxRetries int `json:"max_retries"`
 
-	// Terminal context is populated only for integration jobs and is carried to
-	// Edge without adding third-party fields to the print_jobs table.
-	TerminalSessionID    string `json:"terminal_session_id,omitempty"`
-	TerminalTicketHash   string `json:"terminal_ticket_hash,omitempty"`
-	IntegrationRequestID string `json:"integration_request_id,omitempty"`
-	InitiatorName        string `json:"initiator_name,omitempty"`
-	InitiatorCode        string `json:"initiator_code,omitempty"` // integration provider code; empty = official/main
+	// Terminal proof is carried to Edge for official and Site Portal sessions.
+	TerminalSessionID  string `json:"terminal_session_id,omitempty"`
+	TerminalTicketHash string `json:"terminal_ticket_hash,omitempty"`
+	InitiatorName      string `json:"initiator_name,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

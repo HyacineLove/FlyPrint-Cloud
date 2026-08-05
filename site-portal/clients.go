@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,8 +39,55 @@ type identityBoundary interface {
 }
 
 type cloudClient struct {
-	baseURL, sitePortalCode, apiToken string
-	client                            *http.Client
+	baseURL, sitePortalCode, clientID, clientSecret string
+	client                                          *http.Client
+	tokenMu                                         sync.Mutex
+	accessToken                                     string
+	tokenExpiresAt                                  time.Time
+}
+
+type cloudTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
+}
+
+func (c *cloudClient) bearerToken() (string, error) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	if c.accessToken != "" && time.Now().Add(30*time.Second).Before(c.tokenExpiresAt) {
+		return c.accessToken, nil
+	}
+
+	form := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {c.clientID},
+		"client_secret": {c.clientSecret},
+		"scope":         {"site-portal:access"},
+	}
+	request, err := http.NewRequest(http.MethodPost, strings.TrimRight(c.baseURL, "/")+"/auth/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := c.client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("Cloud OAuth token request failed: HTTP %d", response.StatusCode)
+	}
+	var token cloudTokenResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token); err != nil {
+		return "", fmt.Errorf("decode Cloud OAuth token response: %w", err)
+	}
+	if token.AccessToken == "" || token.ExpiresIn <= 0 {
+		return "", fmt.Errorf("Cloud OAuth token response is incomplete")
+	}
+	c.accessToken = token.AccessToken
+	c.tokenExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+	return c.accessToken, nil
 }
 
 func (c *cloudClient) request(path string, input, output any) error {
@@ -50,9 +99,13 @@ func (c *cloudClient) request(path string, input, output any) error {
 	if err != nil {
 		return err
 	}
+	bearer, err := c.bearerToken()
+	if err != nil {
+		return err
+	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-FlyPrint-Site-Portal", c.sitePortalCode)
-	request.Header.Set("Authorization", "Bearer "+c.apiToken)
+	request.Header.Set("Authorization", "Bearer "+bearer)
 	response, err := c.client.Do(request)
 	if err != nil {
 		return err

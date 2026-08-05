@@ -46,13 +46,14 @@ admin:
   console_url: "https://admin.fly-print.local"
 
 # 首个 Site Portal 可通过环境变量初始化；未完整配置时不会创建。
-# API token 仅由 Site Portal 后端和 Cloud 使用，至少 32 个字符。
+# Site Portal 使用 Cloud 为其生成的 OAuth client credentials；Secret 至少 32 个字符。
 site_portal_bootstrap:
   code: ""
   display_name: ""
   entry_url: ""
   claim_base_url: ""
-  api_token: ""
+  oauth_client_id: ""
+  oauth_client_secret: ""
 
 # 存储配置
 storage:

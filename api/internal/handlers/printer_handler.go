@@ -26,29 +26,14 @@ type PrinterHandler struct {
 	tokenUsageRepo *database.TokenUsageRepository
 	statusService  *operations.StatusService
 	alertRepo      *database.OperationalAlertRepository
-	callbacks      *database.IntegrationCallbackRepository
 }
 
 func NewPrinterHandler(printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, statusService *operations.StatusService, alertRepo *database.OperationalAlertRepository) *PrinterHandler {
-	return NewPrinterHandlerWithCallbacks(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo, nil)
+	return &PrinterHandler{printerRepo: printerRepo, edgeNodeRepo: edgeNodeRepo, printJobRepo: printJobRepo, wsManager: wsManager, tokenUsageRepo: tokenUsageRepo, statusService: statusService, alertRepo: alertRepo}
 }
 
 // NewPrinterHandlerWithCallbacks wires callback persistence for lifecycle
 // settlement before a printer is disabled or deleted.
-func NewPrinterHandlerWithCallbacks(printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, statusService *operations.StatusService, alertRepo *database.OperationalAlertRepository, callbacks *database.IntegrationCallbackRepository) *PrinterHandler {
-	h := &PrinterHandler{
-		printerRepo:    printerRepo,
-		edgeNodeRepo:   edgeNodeRepo,
-		printJobRepo:   printJobRepo,
-		wsManager:      wsManager,
-		tokenUsageRepo: tokenUsageRepo,
-		statusService:  statusService,
-		alertRepo:      alertRepo,
-		callbacks:      callbacks,
-	}
-	return h
-}
-
 func (h *PrinterHandler) settleActiveJobs(printerID, reason string) error {
 	if h.printJobRepo == nil || h.statusService == nil {
 		return fmt.Errorf("active job settlement service unavailable")
@@ -60,11 +45,6 @@ func (h *PrinterHandler) settleActiveJobs(printerID, reason string) error {
 	for _, ref := range refs {
 		if err := h.statusService.ApplyJobResult(ref.ID, ref.EdgeNodeID, ref.PrinterID, "failed", reason, map[string]interface{}{"message": "Printer was disabled or deleted"}); err != nil {
 			return err
-		}
-		if h.callbacks != nil {
-			if err := h.callbacks.TransitionForJob(ref.ID, "failed", reason, "Printer was disabled or deleted"); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

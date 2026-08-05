@@ -23,7 +23,8 @@ type configuration struct {
 	Code                   string
 	DisplayName            string
 	CloudAPIBaseURL        string
-	CloudAPIToken          string
+	CloudOAuthClientID     string
+	CloudOAuthClientSecret string
 	IdentityBrowserBaseURL string
 	IdentityAPIBaseURL     string
 	IdentityClientSecret   string
@@ -40,7 +41,7 @@ type configuration struct {
 
 func (c configuration) validate() error {
 	required := []string{
-		c.Code, c.DisplayName, c.CloudAPIBaseURL, c.CloudAPIToken,
+		c.Code, c.DisplayName, c.CloudAPIBaseURL, c.CloudOAuthClientID, c.CloudOAuthClientSecret,
 		c.IdentityBrowserBaseURL, c.IdentityAPIBaseURL, c.IdentityClientSecret,
 		c.IdentityCallbackURL, c.PRPBaseURL,
 	}
@@ -58,7 +59,7 @@ func (c configuration) validate() error {
 			return fmt.Errorf("Site Portal URL configuration must use absolute HTTP(S) URLs")
 		}
 	}
-	if len(c.CloudAPIToken) < 32 || len(c.IdentityClientSecret) < 32 {
+	if len(c.CloudOAuthClientID) < 3 || len(c.CloudOAuthClientSecret) < 32 || len(c.IdentityClientSecret) < 32 {
 		return fmt.Errorf("Site Portal service credentials must be at least 32 characters")
 	}
 	if c.LoginStateTTL <= 0 || c.ClaimTTL <= 0 || c.OpsSessionTTL <= 0 || c.UserSessionTTL <= 0 {
@@ -425,7 +426,7 @@ func renderPortalPage(w http.ResponseWriter, status int, title, body string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>`+
-		template.HTMLEscapeString(title)+`</title><style>*{box-sizing:border-box}body{margin:0;background:#f3f6fb;color:#172033;font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif}main{max-width:720px;margin:40px auto;padding:28px;background:#fff;border-radius:18px;box-shadow:0 12px 36px #21395f18}h1{margin-top:0}p{color:#657087;line-height:1.7}.primary,button{display:inline-block;padding:12px 18px;border:0;border-radius:10px;background:#1769e0;color:#fff;text-decoration:none;cursor:pointer}input{width:100%;padding:10px;margin:6px 0 12px;border:1px solid #ccd5e3;border-radius:8px}.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}.user{padding:12px;border:1px solid #e2e8f0;border-radius:10px;margin-top:10px}.muted{color:#657087}.hidden{display:none}</style></head><body><main>`+
+		template.HTMLEscapeString(title)+`</title><style>`+portalPageStyle+`</style></head><body><main class="portal-main">`+
 		body+`</main></body></html>`)
 }
 

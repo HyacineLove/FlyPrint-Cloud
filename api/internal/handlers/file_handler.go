@@ -70,7 +70,7 @@ type terminalUploadSessionBinder interface {
 }
 
 type terminalSessionMatcher interface {
-	Matches(nodeID, sessionID, ticketHash, integrationRequestID string) (bool, error)
+	Matches(nodeID, sessionID, ticketHash string) (bool, error)
 }
 
 func NewFileHandler(repo fileRepository, cfg *config.StorageConfig, storageService storage.Service, wsManager *websocket.ConnectionManager, tokenManager *security.TokenManager, settingsProvider businessSettingsProvider, edgeNodeRepo edgeNodeLookup, printerRepo printerLookup) *FileHandler {
@@ -688,7 +688,7 @@ func (h *FileHandler) ensureTerminalUploadSessionActive(rawToken string) error {
 	if info == nil {
 		return errTerminalSessionInvalid
 	}
-	ok, err := h.terminalSessions.Matches(info.NodeID, info.SessionID, info.TicketHash, "")
+	ok, err := h.terminalSessions.Matches(info.NodeID, info.SessionID, info.TicketHash)
 	if err != nil {
 		return err
 	}

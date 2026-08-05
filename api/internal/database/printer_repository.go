@@ -459,7 +459,7 @@ func (r *PrinterRepository) EnablePrintersByEdgeNode(edgeNodeID string) error {
 }
 
 // DeletePrintersByEdgeNode 删除指定 Edge Node 下的所有打印机（软删除）。
-// 保留历史任务、票据和第三方订单所引用的打印机记录。
+// 保留历史任务和票据所引用的打印机记录。
 func (r *PrinterRepository) DeletePrintersByEdgeNode(edgeNodeID string) error {
 	query := `UPDATE printers SET deleted_at = CURRENT_TIMESTAMP WHERE edge_node_id = $1 AND deleted_at IS NULL`
 	result, err := r.db.DB.Exec(query, edgeNodeID)

@@ -3,16 +3,16 @@ package models
 import "time"
 
 // SitePortal describes one independently deployed user entry and its Edge claim endpoint.
-// APITokenHash is used only for Site Portal -> Cloud service authentication.
 type SitePortal struct {
-	Code         string    `json:"code"`
-	DisplayName  string    `json:"display_name"`
-	EntryURL     string    `json:"entry_url"`
-	ClaimBaseURL string    `json:"claim_base_url"`
-	APITokenHash string    `json:"-"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Code               string    `json:"code"`
+	DisplayName        string    `json:"display_name"`
+	EntryURL           string    `json:"entry_url"`
+	ClaimBaseURL       string    `json:"claim_base_url"`
+	Enabled            bool      `json:"enabled"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	OAuthClientID      string    `json:"oauth_client_id,omitempty"`
+	OAuthClientEnabled bool      `json:"oauth_client_enabled,omitempty"`
 }
 
 // ExternalIdentity maps a stable identity from one Site Portal to a Cloud user.

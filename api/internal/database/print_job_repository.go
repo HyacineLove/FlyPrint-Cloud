@@ -118,16 +118,13 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 			   COALESCE(NULLIF(p.display_name, ''), p.name, '') as printer_name,
 			   COALESCE(NULLIF(n.alias, ''), n.name, '') as node_name,
 			   COALESCE(pj.edge_node_id, p.edge_node_id, '') as edge_node_id,
-			   COALESCE(NULLIF(portal.display_name, ''), provider.display_name, '主系统') AS initiator_name,
-			   COALESCE(pj.site_portal_code, provider.code, '') AS initiator_code,
+			   COALESCE(NULLIF(portal.display_name, ''), NULLIF(pj.site_portal_code, ''), '主系统') AS initiator_name,
 			   COALESCE(pj.site_portal_code, '') AS site_portal_code,
 			   pj.quota_reserved,pj.quota_consumed,pj.impressions_completed,pj.sheets_completed
 		FROM print_jobs pj
 		LEFT JOIN users u ON u.id::text = pj.user_id
 		LEFT JOIN printers p ON pj.printer_id = p.id
 		LEFT JOIN edge_nodes n ON p.edge_node_id = n.id
-		LEFT JOIN integration_print_requests integration_request ON integration_request.print_job_id = pj.id
-		LEFT JOIN integration_providers provider ON provider.code = integration_request.provider_code
 		LEFT JOIN site_portals portal ON portal.code = pj.site_portal_code
 		WHERE 1=1`
 
@@ -165,9 +162,9 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 	}
 
 	if initiatorCode == "official" {
-		query += ` AND integration_request.id IS NULL`
+		query += ` AND pj.site_portal_code IS NULL`
 	} else if initiatorCode != "" {
-		query += fmt.Sprintf(" AND provider.code = $%d", argIndex)
+		query += fmt.Sprintf(" AND pj.site_portal_code = $%d", argIndex)
 		args = append(args, initiatorCode)
 		argIndex++
 	}
@@ -211,7 +208,6 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 		var nodeName sql.NullString
 		var edgeNodeID sql.NullString
 		var errorCode sql.NullString
-		var initiatorCode sql.NullString
 		var quotaConsumed, impressionsCompleted, sheetsCompleted sql.NullInt64
 		err := rows.Scan(
 			&job.ID, &job.Name, &job.Status, &job.PrinterID,
@@ -219,7 +215,7 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 			&job.Copies, &job.PaperSize, &job.ColorMode, &job.DuplexMode,
 			&job.StartTime, &job.EndTime, &job.ErrorMessage, &errorCode, &job.RetryCount,
 			&job.MaxRetries, &job.CreatedAt, &job.UpdatedAt,
-			&printerName, &nodeName, &edgeNodeID, &job.InitiatorName, &initiatorCode,
+			&printerName, &nodeName, &edgeNodeID, &job.InitiatorName,
 			&job.SitePortalCode, &job.QuotaReserved,
 			&quotaConsumed, &impressionsCompleted, &sheetsCompleted,
 		)
@@ -242,9 +238,6 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 		}
 		if errorCode.Valid {
 			job.ErrorCode = errorCode.String
-		}
-		if initiatorCode.Valid {
-			job.InitiatorCode = initiatorCode.String
 		}
 		if quotaConsumed.Valid {
 			value := int(quotaConsumed.Int64)
@@ -380,21 +373,16 @@ func (r *PrintJobRepository) CountPrintJobs(status, printerID, userID, edgeNodeI
 	return r.CountPrintJobsFiltered(status, printerID, userID, edgeNodeID, "", "", startTime, endTime)
 }
 
-// CountPrintJobsFiltered counts jobs with optional initiator/provider filter.
-// initiatorCode "" = no filter; "official" = no integration request; otherwise provider code.
+// CountPrintJobsFiltered counts jobs with an optional initiator filter.
+// initiatorCode "" = no filter; "official" = official entry; otherwise Site Portal code.
 func (r *PrintJobRepository) CountPrintJobsFiltered(status, printerID, userID, edgeNodeID, initiatorCode, userEmail string, startTime, endTime *time.Time) (int, error) {
 	query := `SELECT COUNT(*) FROM print_jobs pj`
 	needsPrinter := edgeNodeID != ""
-	needsIntegration := initiatorCode != ""
 	if userEmail != "" {
 		query += ` LEFT JOIN users u ON u.id::text = pj.user_id`
 	}
 	if needsPrinter {
 		query += ` LEFT JOIN printers p ON pj.printer_id = p.id`
-	}
-	if needsIntegration {
-		query += ` LEFT JOIN integration_print_requests integration_request ON integration_request.print_job_id = pj.id`
-		query += ` LEFT JOIN integration_providers provider ON provider.code = integration_request.provider_code`
 	}
 	query += ` WHERE 1=1`
 	args := []interface{}{}
@@ -426,9 +414,9 @@ func (r *PrintJobRepository) CountPrintJobsFiltered(status, printerID, userID, e
 		argIndex++
 	}
 	if initiatorCode == "official" {
-		query += ` AND integration_request.id IS NULL`
+		query += ` AND pj.site_portal_code IS NULL`
 	} else if initiatorCode != "" {
-		query += fmt.Sprintf(" AND provider.code = $%d", argIndex)
+		query += fmt.Sprintf(" AND pj.site_portal_code = $%d", argIndex)
 		args = append(args, initiatorCode)
 		argIndex++
 	}

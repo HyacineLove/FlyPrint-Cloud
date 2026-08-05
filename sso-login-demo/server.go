@@ -170,7 +170,7 @@ func (s *server) loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid login request", http.StatusBadRequest)
 		return
 	}
-	body := `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>统一身份登录</title></head><body><main><h1>统一身份登录</h1><form method="post" action="/login"><input type="hidden" name="redirect_uri" value="` +
+	body := `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>统一身份登录</title><style>` + identityPageStyle + `</style></head><body><main class="auth-main"><h1>统一身份登录</h1><form method="post" action="/login"><input type="hidden" name="redirect_uri" value="` +
 		template.HTMLEscapeString(redirectURI) + `"><input type="hidden" name="state" value="` +
 		template.HTMLEscapeString(state) + `"><label>账号<input name="username" autocomplete="username" required></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">登录</button></form></main></body></html>`
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

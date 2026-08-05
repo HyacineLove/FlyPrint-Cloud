@@ -228,12 +228,6 @@ func (m *ConnectionManager) DispatchPortalSessionReady(nodeID string, payload Po
 	return m.SendToNode(nodeID, message)
 }
 
-// DispatchIntegrationPreview uses the standard preview command while carrying
-// the terminal proof required to bind it to the active kiosk session.
-func (m *ConnectionManager) DispatchIntegrationPreview(nodeID string, payload PreviewFilePayload) error {
-	return m.dispatchPreviewFile(nodeID, payload)
-}
-
 // MarkTerminalOccupied records pending occupy state and pushes terminal_occupied
 // with ACK. HTTP entry redirect must not block on the ACK wait.
 func (m *ConnectionManager) MarkTerminalOccupied(nodeID string, payload TerminalOccupiedPayload) {
@@ -416,7 +410,6 @@ func (m *ConnectionManager) dispatchPrintJob(nodeID string, job *models.PrintJob
 		MaxRetries:           job.MaxRetries,
 		TerminalSessionID:    job.TerminalSessionID,
 		TerminalTicketHash:   job.TerminalTicketHash,
-		IntegrationRequestID: job.IntegrationRequestID,
 	}
 
 	// 如果有文件URL，填充（复用或新生成）下载凭证

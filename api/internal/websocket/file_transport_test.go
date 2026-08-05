@@ -78,22 +78,22 @@ func TestDispatchPreviewFileIncludesContentHash(t *testing.T) {
 	}
 }
 
-func TestDispatchIntegrationPreviewIncludesTerminalProofAndDefaults(t *testing.T) {
+func TestDispatchOfficialPreviewIncludesTerminalProofAndDefaults(t *testing.T) {
 	conn := &Connection{NodeID: "node-1", Send: make(chan []byte, 1)}
 	manager := &ConnectionManager{connections: map[string]*Connection{"node-1": conn}}
 	payload := PreviewFilePayload{FileID: "file-1", FileURL: "/api/v1/files/file-1", FileName: "sample.pdf", ContentHash: testContentHash,
 		TerminalSessionID: "session-1", TerminalTicketHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		IntegrationRequestID: "request-1", PrintOptions: map[string]interface{}{"copies": float64(2)}}
-	if err := manager.DispatchIntegrationPreview("node-1", payload); err != nil {
-		t.Fatalf("dispatch integration preview: %v", err)
+		PrintOptions: map[string]interface{}{"copies": float64(2)}}
+	if err := manager.DispatchOfficialPreview("node-1", payload); err != nil {
+		t.Fatalf("dispatch official preview: %v", err)
 	}
 	var msg Message
 	if err := json.Unmarshal(<-conn.Send, &msg); err != nil {
 		t.Fatal(err)
 	}
 	data := msg.Data.(map[string]interface{})
-	if data["integration_request_id"] != "request-1" || data["terminal_session_id"] != "session-1" {
-		t.Fatalf("integration context missing: %#v", data)
+	if data["terminal_session_id"] != "session-1" || data["terminal_ticket_hash"] == "" {
+		t.Fatalf("terminal context missing: %#v", data)
 	}
 	options := data["print_options"].(map[string]interface{})
 	if options["copies"] != float64(2) {

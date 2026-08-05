@@ -15,19 +15,18 @@ func NewTerminalSessionRepository(db *DB) *TerminalSessionRepository {
 }
 
 type TerminalSessionSnapshot struct {
-	NodeID               string
-	TerminalSessionID    string
-	TerminalTicketHash   string
-	EntryType            string
-	IntegrationRequestID string
+	NodeID            string
+	TerminalSessionID string
+	TerminalTicketHash string
+	EntryType         string
 }
 
 func (r *TerminalSessionRepository) Get(nodeID string) (*TerminalSessionSnapshot, error) {
 	row := r.db.QueryRow(`SELECT node_id, COALESCE(terminal_session_id,''), COALESCE(terminal_ticket_hash,''),
-		COALESCE(entry_type,''), COALESCE(integration_request_id::text,'')
+		COALESCE(entry_type,'')
 		FROM edge_terminal_sessions WHERE node_id=$1`, nodeID)
 	snap := &TerminalSessionSnapshot{}
-	if err := row.Scan(&snap.NodeID, &snap.TerminalSessionID, &snap.TerminalTicketHash, &snap.EntryType, &snap.IntegrationRequestID); err != nil {
+	if err := row.Scan(&snap.NodeID, &snap.TerminalSessionID, &snap.TerminalTicketHash, &snap.EntryType); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -36,19 +35,19 @@ func (r *TerminalSessionRepository) Get(nodeID string) (*TerminalSessionSnapshot
 	return snap, nil
 }
 
-func (r *TerminalSessionRepository) Report(nodeID, sessionID, ticketHash, entryType, integrationRequestID string, now time.Time) error {
-	_, err := r.db.Exec(`INSERT INTO edge_terminal_sessions(node_id,terminal_session_id,terminal_ticket_hash,entry_type,integration_request_id,updated_at)
-		VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,'')::uuid,$6)
+
+func (r *TerminalSessionRepository) Report(nodeID, sessionID, ticketHash, entryType string, now time.Time) error {
+	_, err := r.db.Exec(`INSERT INTO edge_terminal_sessions(node_id,terminal_session_id,terminal_ticket_hash,entry_type,updated_at)
+		VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),$5)
 		ON CONFLICT(node_id) DO UPDATE SET terminal_session_id=EXCLUDED.terminal_session_id,terminal_ticket_hash=EXCLUDED.terminal_ticket_hash,
-		entry_type=EXCLUDED.entry_type,integration_request_id=EXCLUDED.integration_request_id,updated_at=EXCLUDED.updated_at`,
-		nodeID, sessionID, ticketHash, entryType, integrationRequestID, now)
+		entry_type=EXCLUDED.entry_type,updated_at=EXCLUDED.updated_at`,
+		nodeID, sessionID, ticketHash, entryType, now)
 	return err
 }
 
-func (r *TerminalSessionRepository) Matches(nodeID, sessionID, ticketHash, integrationRequestID string) (bool, error) {
+func (r *TerminalSessionRepository) Matches(nodeID, sessionID, ticketHash string) (bool, error) {
 	var count int
 	err := r.db.QueryRow(`SELECT COUNT(*) FROM edge_terminal_sessions WHERE node_id=$1 AND terminal_session_id=$2
-		AND (terminal_ticket_hash=$3 OR terminal_ticket_hash IS NULL)
-		AND (integration_request_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid)`, nodeID, sessionID, ticketHash, integrationRequestID).Scan(&count)
+		AND (terminal_ticket_hash=$3 OR terminal_ticket_hash IS NULL)`, nodeID, sessionID, ticketHash).Scan(&count)
 	return count == 1, err
 }

@@ -373,16 +373,7 @@ const PublicUpload: React.FC = () => {
 
   if (pageState === 'invalid') {
     return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          background: '#f0f2f5',
-          padding: 24,
-        }}
-      >
+      <div className="fp-upload-shell">
         <Alert
           message="访问失败"
           description={pageErrorMessage}
@@ -397,16 +388,7 @@ const PublicUpload: React.FC = () => {
 
   if (pageState === 'success') {
     return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          background: '#f0f2f5',
-          padding: 24,
-        }}
-      >
+      <div className="fp-upload-shell">
         <Result
           status="success"
           title="上传成功"
@@ -422,18 +404,9 @@ const PublicUpload: React.FC = () => {
   const uploadDisabled = !selectedFile || !!validationError || uploadPhase !== 'idle';
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: '#f0f2f5',
-        padding: 24,
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
-      <div style={{ maxWidth: 640, width: '100%' }}>
-        <Card style={{ textAlign: 'center' }}>
+    <div className="fp-upload-shell">
+      <div className="fp-upload-content">
+        <Card className="fp-upload-card" style={{ textAlign: 'center' }}>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
             <Button type="link" danger icon={<LogoutOutlined />} onClick={() => void handleLogout()}>
               退出账号

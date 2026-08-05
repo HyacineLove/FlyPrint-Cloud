@@ -17,8 +17,8 @@ const node = {
   last_heartbeat: '2026-07-27T00:00:00Z',
 };
 
-const provider = {
-  id: 'provider-1',
+const sitePortal = {
+  id: 'site-portal-1',
   code: 'campus-print',
   display_name: '校园入口',
   enabled: true,
@@ -48,12 +48,12 @@ describe('EdgeNodes login source', () => {
     });
   });
 
-  it('shows the official and enabled provider login sources', async () => {
+  it('shows the official and enabled Site Portal login sources', async () => {
     global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
       if (url.includes('/admin/edge-nodes')) return response({ items: [node], total: 1 });
-      if (url.includes('/admin/integration-providers')) return response([provider]);
+      if (url.includes('/admin/site-portals')) return response([sitePortal]);
       return response({});
     }) as jest.Mock;
 
@@ -72,9 +72,9 @@ describe('EdgeNodes login source', () => {
     const fetchMock = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
-      if (url.includes('/admin/edge-nodes') && init?.method === 'PATCH') return response({ id: node.id, login_source: provider.code });
+      if (url.includes('/admin/edge-nodes') && init?.method === 'PATCH') return response({ id: node.id, login_source: sitePortal.code });
       if (url.includes('/admin/edge-nodes')) return response({ items: [node], total: 1 });
-      if (url.includes('/admin/integration-providers')) return response([provider]);
+      if (url.includes('/admin/site-portals')) return response([sitePortal]);
       return response({});
     });
     global.fetch = fetchMock as jest.Mock;

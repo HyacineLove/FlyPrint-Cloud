@@ -34,7 +34,7 @@ func TestCreateForCurrentSessionBindsTicketAtomically(t *testing.T) {
 		WithArgs("ticket-hash", "node-1", "printer-1", "session-1", expiresAt).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "issued_at"}).AddRow("ticket-1", issuedAt))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE edge_terminal_sessions
-		SET terminal_ticket_hash=$3, entry_type='entry', integration_request_id=NULL, updated_at=$4
+		SET terminal_ticket_hash=$3, entry_type='entry', updated_at=$4
 		WHERE node_id=$1 AND terminal_session_id=$2`)).
 		WithArgs("node-1", "session-1", "ticket-hash", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))

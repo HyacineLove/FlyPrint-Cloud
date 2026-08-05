@@ -8,7 +8,6 @@ import {
   FileTextOutlined,
   LogoutOutlined,
   ControlOutlined,
-  ApiOutlined,
   TeamOutlined,
   UserOutlined
 } from '@ant-design/icons';
@@ -23,7 +22,7 @@ import PublicUpload from './components/pages/PublicUpload';
 import Login from './components/pages/Login';
 import Register from './components/pages/Register';
 import BusinessSettings from './components/pages/BusinessSettings';
-import IntegrationProviders from './components/pages/IntegrationProviders';
+import SitePortals from './components/pages/SitePortals';
 import OpsContacts from './components/pages/OpsContacts';
 import Users from './components/pages/Users';
 
@@ -138,9 +137,9 @@ const AdminApp: React.FC = () => {
       label: '业务配置',
     },
     {
-      key: '/integration-providers',
-      icon: <ApiOutlined />,
-      label: '三方接入',
+      key: '/site-portals',
+      icon: <CloudServerOutlined />,
+      label: 'Site Portal',
     },
   ];
 
@@ -163,8 +162,9 @@ const AdminApp: React.FC = () => {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className="fp-admin-layout" style={{ minHeight: '100vh' }}>
       <Sider
+        className="fp-admin-sider"
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
@@ -176,19 +176,7 @@ const AdminApp: React.FC = () => {
           bottom: 0,
         }}
       >
-        <div style={{
-          height: 48,
-          margin: 16,
-          background: 'rgba(255, 255, 255, 0.3)',
-          borderRadius: 6,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'white',
-          fontWeight: 'bold',
-          whiteSpace: 'nowrap',
-          fontSize: 16,
-        }}>
+        <div className="fp-admin-brand">
           {collapsed ? 'FP' : '飞印服务管理中心'}
         </div>
         <Menu
@@ -200,14 +188,12 @@ const AdminApp: React.FC = () => {
         />
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 80 : 200, transition: 'margin-left 0.2s' }}>
-        <Header style={{
-          background: '#fff',
+      <Layout className="fp-admin-main" style={{ marginLeft: collapsed ? 80 : 200, transition: 'margin-left 0.2s' }}>
+        <Header className="fp-admin-header" style={{
           padding: '0 24px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          boxShadow: '0 1px 4px rgba(0,21,41,.08)',
           position: 'sticky',
           top: 0,
           zIndex: 1,
@@ -223,17 +209,8 @@ const AdminApp: React.FC = () => {
           </Space>
         </Header>
 
-        <Content style={{
-          margin: '24px',
-          minHeight: 'calc(100vh - 112px)',
-        }}>
-          <div style={{
-            background: '#fff',
-            padding: 24,
-            borderRadius: 8,
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-            minHeight: 'calc(100vh - 160px)',
-          }}>
+        <Content className="fp-admin-content">
+          <div className="fp-admin-surface">
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/edge-nodes" element={<EdgeNodes />} />
@@ -242,7 +219,7 @@ const AdminApp: React.FC = () => {
               <Route path="/printers" element={<Printers />} />
               <Route path="/print-jobs" element={<PrintJobs />} />
               <Route path="/business-settings" element={<BusinessSettings />} />
-              <Route path="/integration-providers" element={<IntegrationProviders />} />
+              <Route path="/site-portals" element={<SitePortals />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

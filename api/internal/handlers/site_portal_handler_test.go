@@ -21,8 +21,8 @@ type fakeSitePortalAuthenticator struct {
 	err    error
 }
 
-func (f *fakeSitePortalAuthenticator) Authenticate(code, rawToken string) (*models.SitePortal, error) {
-	if f.err != nil || code != "official" || rawToken != "portal-token" {
+func (f *fakeSitePortalAuthenticator) GetByCode(code string) (*models.SitePortal, error) {
+	if f.err != nil || code != "official" {
 		return nil, database.ErrSitePortalUnauthorized
 	}
 	return f.portal, nil
@@ -41,7 +41,7 @@ type fakePortalSessionMatcher struct {
 	matched bool
 }
 
-func (f *fakePortalSessionMatcher) Matches(_, _, _, _ string) (bool, error) {
+func (f *fakePortalSessionMatcher) Matches(_, _, _ string) (bool, error) {
 	return f.matched, nil
 }
 
@@ -88,6 +88,11 @@ func (f *fakePortalReadyDispatcher) DispatchPortalSessionReady(nodeID string, pa
 func newSitePortalTestRouter(handler *SitePortalHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("client_type", "site_portal")
+		c.Set("site_portal_code", "official")
+		c.Next()
+	})
 	router.POST("/context", handler.Context)
 	router.POST("/login-completions", handler.CompleteLogin)
 	return router

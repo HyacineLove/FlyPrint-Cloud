@@ -32,14 +32,14 @@ func TestPrintJobHandlerListPassesUserEmailFilter(t *testing.T) {
 			"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
 			"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 			"error_code", "retry_count", "max_retries", "created_at", "updated_at", "printer_name",
-			"node_name", "edge_node_id", "initiator_name", "initiator_code",
-			"site_portal_code", "quota_reserved", "quota_consumed",
+		"node_name", "edge_node_id", "initiator_name", "site_portal_code",
+		"quota_reserved", "quota_consumed",
 			"impressions_completed", "sheets_completed",
 		}).AddRow(
 			"job-1", "document.pdf", "completed", "printer-1", "user-1", "Alice", "alice@example.com",
 			"/data/document.pdf", "", "hash", int64(100), 2, 1, "A4", "color", "single",
 			nil, time.Now(), "", nil, 0, 3, time.Now(), time.Now(), "Printer 1", "Node 1", "node-1", "主系统", "",
-			"", 0, nil, nil, nil,
+			0, nil, nil, nil,
 		))
 
 	handler := NewPrintJobHandler(repo, nil, nil, nil, nil, nil)

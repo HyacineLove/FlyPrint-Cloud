@@ -45,7 +45,6 @@ type PreviewFilePayload struct {
 	PrintOptions             map[string]interface{} `json:"print_options,omitempty"`
 	TerminalSessionID        string                 `json:"terminal_session_id,omitempty"`
 	TerminalTicketHash       string                 `json:"terminal_ticket_hash,omitempty"`
-	IntegrationRequestID     string                 `json:"integration_request_id,omitempty"`
 	FileAccessToken          string                 `json:"file_access_token,omitempty"`            // 文件访问凭证
 	FileAccessTokenExpiresAt *time.Time             `json:"file_access_token_expires_at,omitempty"` // 凭证过期时间
 }
@@ -57,7 +56,6 @@ type SubmitPrintParamsPayload struct {
 	Options              map[string]interface{} `json:"options"` // copies, color, duplex, paper_size, etc.
 	TerminalSessionID    string                 `json:"terminal_session_id,omitempty"`
 	TerminalTicketHash   string                 `json:"terminal_ticket_hash,omitempty"`
-	IntegrationRequestID string                 `json:"integration_request_id,omitempty"`
 }
 
 // PrintJobPayload 打印任务指令载荷
@@ -120,7 +118,6 @@ type JobUpdateData struct {
 	QuotaConsumed        int     `json:"quota_consumed,omitempty"`
 	TerminalSessionID    string  `json:"terminal_session_id,omitempty"`
 	TerminalTicketHash   string  `json:"terminal_ticket_hash,omitempty"`
-	IntegrationRequestID string  `json:"integration_request_id,omitempty"`
 }
 
 // JobUpdateAckPayload is sent only after Cloud has durably accepted or
@@ -151,7 +148,6 @@ type PrintJobData struct {
 	MaxRetries               int        `json:"max_retries"`
 	TerminalSessionID        string     `json:"terminal_session_id,omitempty"`
 	TerminalTicketHash       string     `json:"terminal_ticket_hash,omitempty"`
-	IntegrationRequestID     string     `json:"integration_request_id,omitempty"`
 }
 
 // RequestUploadTokenPayload 请求上传凭证载荷 (Edge -> Cloud)
@@ -167,7 +163,6 @@ type TerminalSessionStateData struct {
 	TerminalSessionID    string `json:"terminal_session_id"`
 	TerminalTicketHash   string `json:"terminal_ticket_hash"`
 	EntryType            string `json:"entry_type"`
-	IntegrationRequestID string `json:"integration_request_id"`
 }
 
 // TerminalOccupiedPayload tells Edge a phone has entered via the current QR

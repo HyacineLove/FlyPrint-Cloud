@@ -42,4 +42,23 @@ func TestInitTablesOnFreshDatabase(t *testing.T) {
 			t.Fatalf("table %s was not created", tableName)
 		}
 	}
+	for _, tableName := range []string{"integration_providers", "integration_print_requests", "integration_callback_events"} {
+		var exists bool
+		if err := sqlDB.QueryRow(`SELECT to_regclass('public.' || $1) IS NOT NULL`, tableName).Scan(&exists); err != nil {
+			t.Fatalf("check removed table %s: %v", tableName, err)
+		}
+		if exists {
+			t.Fatalf("legacy table %s still exists", tableName)
+		}
+	}
+	var legacyColumn bool
+	if err := sqlDB.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public' AND table_name='edge_terminal_sessions' AND column_name='integration_request_id'
+	)`).Scan(&legacyColumn); err != nil {
+		t.Fatalf("check removed terminal session column: %v", err)
+	}
+	if legacyColumn {
+		t.Fatal("legacy integration_request_id column still exists")
+	}
 }

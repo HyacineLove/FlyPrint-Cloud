@@ -86,7 +86,7 @@ func (r *TerminalTicketRepository) CreateForCurrentSession(ticket *models.Termin
 	}
 
 	result, err := tx.Exec(`UPDATE edge_terminal_sessions
-		SET terminal_ticket_hash=$3, entry_type='entry', integration_request_id=NULL, updated_at=$4
+		SET terminal_ticket_hash=$3, entry_type='entry', updated_at=$4
 		WHERE node_id=$1 AND terminal_session_id=$2`,
 		ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash, time.Now())
 	if err != nil {
@@ -110,7 +110,7 @@ func (r *TerminalTicketRepository) GetValidByHash(hash string, now time.Time) (*
 
 // Select locks a ticket to one entry. While the ticket is still selected and
 // not consumed, the user may re-select (same or different entry) after backing
-// out of upload/provider without completing — e.g. WeChat back to Entry.
+// out of upload or entry selection without completing.
 func (r *TerminalTicketRepository) Select(hash, entry string, now time.Time) (*models.TerminalTicket, error) {
 	row := r.db.QueryRow(`UPDATE terminal_tickets SET selected_entry=$2,status='selected',selected_at=$3
 		WHERE ticket_hash=$1 AND status IN ('issued','selected') AND expires_at>$3

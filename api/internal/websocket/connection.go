@@ -54,8 +54,6 @@ type Connection struct {
 	TerminalSessions    *database.TerminalSessionRepository
 	TerminalTickets     *database.TerminalTicketRepository
 	UploadSessions      *database.TerminalUploadSessionRepository
-	Callbacks           *database.IntegrationCallbackRepository
-	IntegrationRequests *database.IntegrationPrintRequestRepository
 
 	// ACK 机制相关
 	pendingAcks map[string]chan string
@@ -63,7 +61,7 @@ type Connection struct {
 }
 
 // NewConnection 创建新连接
-func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, callbacks *database.IntegrationCallbackRepository, integrationRequests *database.IntegrationPrintRequestRepository) *Connection {
+func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository) *Connection {
 	return &Connection{
 		NodeID:              nodeID,
 		Conn:                conn,
@@ -80,8 +78,6 @@ func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManag
 		TerminalSessions:    terminalSessions,
 		TerminalTickets:     terminalTickets,
 		UploadSessions:      uploadSessions,
-		Callbacks:           callbacks,
-		IntegrationRequests: integrationRequests,
 		pendingAcks:         make(map[string]chan string),
 	}
 }
@@ -293,13 +289,6 @@ func (c *Connection) handleTerminalSessionState(msg *Message) {
 		logger.Warn("Invalid terminal ticket hash in session state", zap.String("node_id", c.NodeID))
 		return
 	}
-	if payload.IntegrationRequestID != "" {
-		if _, err := uuid.Parse(payload.IntegrationRequestID); err != nil {
-			logger.Warn("Invalid integration request ID in session state", zap.String("node_id", c.NodeID))
-			return
-		}
-	}
-
 	previous, _ := c.TerminalSessions.Get(c.NodeID)
 	sessionChanged := previous == nil || previous.TerminalSessionID != payload.TerminalSessionID
 	if sessionChanged {
@@ -318,7 +307,7 @@ func (c *Connection) handleTerminalSessionState(msg *Message) {
 		}
 	}
 
-	if err := c.TerminalSessions.Report(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash, payload.EntryType, payload.IntegrationRequestID, time.Now()); err != nil {
+	if err := c.TerminalSessions.Report(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash, payload.EntryType, time.Now()); err != nil {
 		logger.Error("Failed to persist terminal session state", zap.String("node_id", c.NodeID), zap.Error(err))
 		return
 	}
@@ -448,44 +437,6 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 		return
 	}
 
-	if payload.IntegrationRequestID != "" {
-		if c.IntegrationRequests == nil || payload.TerminalSessionID == "" || payload.TerminalTicketHash == "" {
-			c.sendError("integration_context_mismatch", "Integration terminal context is incomplete", payload.PrinterID)
-			return
-		}
-		confirmation := database.IntegrationPrintConfirmation{
-			RequestID: payload.IntegrationRequestID, NodeID: c.NodeID, FileID: payload.FileID, PrinterID: payload.PrinterID,
-			TerminalSessionID: payload.TerminalSessionID, TerminalTicketHash: payload.TerminalTicketHash,
-			Copies: optionInt(payload.Options, "copies", 1), PaperSize: optionString(payload.Options, "paper_size"),
-			ColorMode: optionString(payload.Options, "color_mode"), DuplexMode: optionString(payload.Options, "duplex_mode"),
-		}
-		job, created, err := c.IntegrationRequests.ConfirmAndCreateJob(confirmation)
-		if err != nil {
-			logger.Warn("Integration print confirmation rejected", zap.String("request_id", payload.IntegrationRequestID), zap.Error(err))
-			c.sendError("integration_context_mismatch", "Integration request no longer matches this terminal", payload.PrinterID)
-			return
-		}
-		if !created {
-			return
-		}
-		go DispatchPrintJobAndRecordWithHooks(c.Manager, c.PrintJobRepo, c.StatusService, job, c.NodeID, DispatchHooks{
-			AfterDispatched: func() error {
-				return c.IntegrationRequests.MarkDispatched(payload.IntegrationRequestID, job.ID)
-			},
-			AfterFailure: func(errorCode, errorMessage string) error {
-				if c.Callbacks == nil {
-					return fmt.Errorf("integration callback repository unavailable")
-				}
-				status := "failed"
-				if errorCode == "dispatch_ack_timeout" {
-					status = "dispatched"
-				}
-				return c.Callbacks.TransitionForJob(job.ID, status, errorCode, errorMessage)
-			},
-		})
-		return
-	}
-
 	// 获取文件信息
 	file, err := c.FileRepo.GetByID(payload.FileID)
 	if err != nil {
@@ -512,7 +463,7 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 				c.sendError("terminal_session_invalid", "Terminal session is no longer valid", payload.PrinterID)
 				return
 			}
-			matched, matchErr := c.TerminalSessions.Matches(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash, "")
+			matched, matchErr := c.TerminalSessions.Matches(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash)
 			if matchErr != nil || !matched {
 				c.sendError("terminal_session_invalid", "Terminal session is no longer valid", payload.PrinterID)
 				return
@@ -608,25 +559,6 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 }
 
 // handleHeartbeat 处理心跳消息
-func optionInt(options map[string]interface{}, key string, fallback int) int {
-	if value, ok := options[key].(float64); ok && value >= 1 {
-		return int(value)
-	}
-	return fallback
-}
-
-func optionString(options map[string]interface{}, key string) string {
-	value, _ := options[key].(string)
-	return value
-}
-
-func transitionIntegrationStatus(callbacks *database.IntegrationCallbackRepository, jobID, status, errorCode, errorMessage string) error {
-	if callbacks == nil {
-		return nil
-	}
-	return callbacks.TransitionForJob(jobID, status, errorCode, errorMessage)
-}
-
 func (c *Connection) handleHeartbeat(msg *Message) {
 	logger.Debug("Processing heartbeat from node", zap.String("node_id", c.NodeID))
 
@@ -835,15 +767,6 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 		c.sendJobUpdateAck(jobData.EventID, jobData.JobID, "rejected", "job_node_mismatch")
 		return
 	}
-	if c.Callbacks != nil {
-		matched, err := c.Callbacks.ValidateJobContext(jobData.JobID, jobData.TerminalSessionID, jobData.TerminalTicketHash, jobData.IntegrationRequestID)
-		if err != nil || !matched {
-			logger.Warn("Ignoring job update with invalid integration terminal context", zap.String("job_id", jobData.JobID), zap.String("node_id", c.NodeID))
-			c.sendJobUpdateAck(jobData.EventID, jobData.JobID, "rejected", "terminal_context_mismatch")
-			return
-		}
-	}
-
 	if isTerminalJobStatus(jobData.Status) {
 		if _, err := uuid.Parse(jobData.EventID); err != nil {
 			logger.Warn("Rejecting terminal job update without a valid event ID", zap.String("job_id", jobData.JobID))
@@ -868,15 +791,6 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 			c.sendJobUpdateAck(jobData.EventID, jobData.JobID, "rejected", result.Reason)
 			return
 		}
-		if result.Accepted && c.Callbacks != nil {
-			integrationStatus := map[string]string{"completed": "completed", "failed": "failed", "canceled": "cancelled", "unconfirmed": "failed"}[jobData.Status]
-			if integrationStatus != "" {
-				if callbackErr := transitionIntegrationStatus(c.Callbacks, jobData.JobID, integrationStatus, jobData.ErrorCode, errMsg); callbackErr != nil {
-					logger.Error("Failed to persist integration terminal callback", zap.String("job_id", jobData.JobID), zap.Error(callbackErr))
-					return
-				}
-			}
-		}
 		c.sendJobUpdateAck(jobData.EventID, jobData.JobID, "accepted", "")
 		logger.Info("Terminal job update accepted", zap.String("job_id", jobData.JobID), zap.String("status", jobData.Status), zap.String("event_id", jobData.EventID))
 		return
@@ -899,15 +813,6 @@ func (c *Connection) handleJobUpdate(msg *Message) {
 		logger.Error("Failed to update job status", zap.String("job_id", jobData.JobID), zap.Error(err))
 		return
 	}
-	if c.Callbacks != nil {
-		integrationStatus := map[string]string{"processing": "printing", "completed": "completed", "failed": "failed", "canceled": "cancelled", "unconfirmed": "failed"}[jobData.Status]
-		if integrationStatus != "" {
-			if callbackErr := transitionIntegrationStatus(c.Callbacks, jobData.JobID, integrationStatus, jobData.ErrorCode, errMsg); callbackErr != nil {
-				logger.Error("Failed to persist integration status callback", zap.String("job_id", jobData.JobID), zap.Error(callbackErr))
-			}
-		}
-	}
-
 	logger.Info("Successfully updated job status", zap.String("job_id", jobData.JobID), zap.String("status", jobData.Status))
 }
 
@@ -924,7 +829,7 @@ func terminalJobUpdatePayloadHash(data JobUpdateData) string {
 		data.JobID, data.Status, data.ErrorCode, message,
 		fmt.Sprintf("%d", data.ImpressionsCompleted), fmt.Sprintf("%d", data.SheetsCompleted),
 		fmt.Sprintf("%d", data.QuotaConsumed),
-		data.TerminalSessionID, data.TerminalTicketHash, data.IntegrationRequestID,
+		data.TerminalSessionID, data.TerminalTicketHash,
 	}, "\n")
 	sum := sha256.Sum256([]byte(plain))
 	return fmt.Sprintf("%x", sum[:])

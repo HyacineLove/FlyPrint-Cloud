@@ -11,7 +11,6 @@ func (db *DB) initSitePortalSchema() error {
 			display_name VARCHAR(120) NOT NULL,
 			entry_url VARCHAR(1000) NOT NULL,
 			claim_base_url VARCHAR(1000) NOT NULL,
-			api_token_hash CHAR(64) NOT NULL,
 			enabled BOOLEAN NOT NULL DEFAULT true,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

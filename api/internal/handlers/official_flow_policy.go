@@ -5,5 +5,5 @@ package handlers
 func officialRegistrationRole() string { return "viewer" }
 
 func isValidTerminalLoginSource(source string) bool {
-	return source == "official" || providerCodePattern.MatchString(source)
+	return source == "official" || sitePortalCodePattern.MatchString(source)
 }

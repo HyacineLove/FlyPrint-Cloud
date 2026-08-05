@@ -19,8 +19,19 @@ func TestIdentityTokenTravelsFromIdentityThroughPortalClaimWithoutEnteringCloud(
 		cloudCompletion map[string]any
 	)
 	cloudServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/token" {
+			if err := r.ParseForm(); err != nil || r.Form.Get("grant_type") != "client_credentials" ||
+				r.Form.Get("client_id") != "site-portal-client" || r.Form.Get("client_secret") != "cloud-portal-secret-12345678901234567890" {
+				http.Error(w, "invalid client credentials", http.StatusUnauthorized)
+				return
+			}
+			writePortalJSON(w, http.StatusOK, map[string]any{
+				"access_token": "oauth-access-token", "token_type": "bearer", "expires_in": 300,
+			})
+			return
+		}
 		if r.Header.Get("X-FlyPrint-Site-Portal") != "official" ||
-			r.Header.Get("Authorization") != "Bearer cloud-portal-token-12345678901234567890" {
+			r.Header.Get("Authorization") != "Bearer oauth-access-token" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -62,7 +73,7 @@ func TestIdentityTokenTravelsFromIdentityThroughPortalClaimWithoutEnteringCloud(
 	config := testPortalConfig()
 	cloud := &cloudClient{
 		baseURL: cloudServer.URL, sitePortalCode: "official",
-		apiToken: "cloud-portal-token-12345678901234567890", client: client,
+		clientID: "site-portal-client", clientSecret: "cloud-portal-secret-12345678901234567890", client: client,
 	}
 	identity := &identityClient{
 		apiBaseURL:   identityServer.URL,

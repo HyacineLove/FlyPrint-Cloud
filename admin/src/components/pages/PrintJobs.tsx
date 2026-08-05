@@ -44,7 +44,7 @@ const PrintJobs: React.FC = () => {
   const navigate = useNavigate();
   const edgeNodeFilter = searchParams.get('edge_node_id') || searchParams.get('node_id') || '';
   const printerFilter = searchParams.get('printer_id') || '';
-  const initiatorFilter = searchParams.get('initiator_code') || searchParams.get('provider_code') || '';
+  const initiatorFilter = searchParams.get('initiator_code') || '';
   const userEmailFilter = searchParams.get('user_email') || '';
   const [jobs, setJobs] = useState<PrintJob[]>([]);
   const [total, setTotal] = useState(0);
@@ -120,7 +120,7 @@ const PrintJobs: React.FC = () => {
           </span>;
         }
         if (job.initiator_code) {
-          return <TwoLineLink to={`/integration-providers?code=${encodeURIComponent(job.initiator_code)}`} id={job.initiator_code} name={job.initiator_name || job.initiator_code} />;
+          return <TwoLineLink to={`/site-portals?code=${encodeURIComponent(job.initiator_code)}`} id={job.initiator_code} name={job.initiator_name || job.initiator_code} />;
         }
         return job.initiator_name || '主系统';
       },

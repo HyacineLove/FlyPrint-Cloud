@@ -36,8 +36,8 @@ const Register: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(160deg, #0b1f3a 0%, #1268e8 55%, #3d8bfd 100%)' }}>
-      <Card style={{ width: 400 }}>
+    <div className="fp-auth-shell">
+      <Card className="fp-auth-card">
         <Title level={3}>注册官方账号</Title>
         <Text type="secondary">注册后可在扫码终端上传并确认打印</Text>
         <Form layout="vertical" size="large" onFinish={onFinish} style={{ marginTop: 24 }}>

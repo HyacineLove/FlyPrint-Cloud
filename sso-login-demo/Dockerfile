@@ -4,6 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
+COPY web_style.css ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/sso-login-demo .
 
 FROM ${DOCKERHUB_MIRROR}/library/alpine:3.22

@@ -16,6 +16,8 @@ import (
 type OAuth2TokenInfo struct {
 	Sub               string   `json:"sub"`
 	NodeID            string   `json:"node_id,omitempty"`
+	ClientType        string   `json:"client_type,omitempty"`
+	SitePortalCode    string   `json:"site_portal_code,omitempty"`
 	PreferredUsername string   `json:"preferred_username"`
 	Email             string   `json:"email"`
 	Groups            []string `json:"groups,omitempty"` // OIDC 标准 groups claim
@@ -131,6 +133,8 @@ func oauth2ResourceServer(requiredScopes []string, anyScope bool) gin.HandlerFun
 		c.Set("oauth2_token", token)
 		c.Set("external_id", tokenInfo.Sub)
 		c.Set("node_id", tokenInfo.NodeID)
+		c.Set("client_type", tokenInfo.ClientType)
+		c.Set("site_portal_code", tokenInfo.SitePortalCode)
 		c.Set("username", tokenInfo.PreferredUsername)
 		c.Set("email", tokenInfo.Email)
 		c.Set("roles", userRoles)
@@ -204,6 +208,12 @@ func tokenInfoFromClaims(claims jwt.MapClaims) *OAuth2TokenInfo {
 	}
 	if nodeID, ok := claims["node_id"].(string); ok {
 		tokenInfo.NodeID = nodeID
+	}
+	if clientType, ok := claims["client_type"].(string); ok {
+		tokenInfo.ClientType = clientType
+	}
+	if portalCode, ok := claims["site_portal_code"].(string); ok {
+		tokenInfo.SitePortalCode = portalCode
 	}
 
 	// 提取 realm_access roles
@@ -436,6 +446,8 @@ func OptionalOAuth2ResourceServer() gin.HandlerFunc {
 		c.Set("oauth2_token", token)
 		c.Set("external_id", tokenInfo.Sub)
 		c.Set("node_id", tokenInfo.NodeID)
+		c.Set("client_type", tokenInfo.ClientType)
+		c.Set("site_portal_code", tokenInfo.SitePortalCode)
 		c.Set("username", tokenInfo.PreferredUsername)
 		c.Set("email", tokenInfo.Email)
 		c.Set("roles", userRoles)

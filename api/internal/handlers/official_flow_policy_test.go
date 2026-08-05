@@ -29,10 +29,10 @@ func TestTerminalLoginSourceValidation(t *testing.T) {
 		valid  bool
 	}{
 		{source: "official", valid: true},
-		{source: "livacloud-demo", valid: true},
+		{source: "official-site", valid: true},
 		{source: "", valid: false},
-		{source: "not a provider", valid: false},
-		{source: "../provider", valid: false},
+		{source: "not a portal", valid: false},
+		{source: "../portal", valid: false},
 	}
 
 	for _, tt := range tests {

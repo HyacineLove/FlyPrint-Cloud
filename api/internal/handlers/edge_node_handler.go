@@ -25,22 +25,20 @@ type EdgeNodeHandler struct {
 	wsManager           *websocket.ConnectionManager
 	tokenUsageRepo      *database.TokenUsageRepository
 	alertRepo           *database.OperationalAlertRepository
-	providerRepo        *database.IntegrationProviderRepository
 	tickets             *database.TerminalTicketRepository
 	uploadSessions      *database.TerminalUploadSessionRepository
-	integrationRequests *database.IntegrationPrintRequestRepository
+	sitePortalRepo      *database.SitePortalRepository
 	statusService       *operations.StatusService
-	callbacks           *database.IntegrationCallbackRepository
 }
 
 // NewEdgeNodeHandler 创建 Edge Node 管理处理器
-func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, integrationRequests *database.IntegrationPrintRequestRepository, opsContactRepo *database.OpsContactRepository, providerRepo *database.IntegrationProviderRepository) *EdgeNodeHandler {
-	return NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, tickets, uploadSessions, integrationRequests, opsContactRepo, providerRepo, nil, nil)
+func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, sitePortalRepo *database.SitePortalRepository, opsContactRepo *database.OpsContactRepository) *EdgeNodeHandler {
+	return NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, tickets, uploadSessions, sitePortalRepo, opsContactRepo, nil)
 }
 
 // NewEdgeNodeHandlerWithServices wires the lifecycle settlement dependencies
 // used when disabling or deleting an Edge node.
-func NewEdgeNodeHandlerWithServices(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, integrationRequests *database.IntegrationPrintRequestRepository, opsContactRepo *database.OpsContactRepository, providerRepo *database.IntegrationProviderRepository, statusService *operations.StatusService, callbacks *database.IntegrationCallbackRepository) *EdgeNodeHandler {
+func NewEdgeNodeHandlerWithServices(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, sitePortalRepo *database.SitePortalRepository, opsContactRepo *database.OpsContactRepository, statusService *operations.StatusService) *EdgeNodeHandler {
 	h := &EdgeNodeHandler{
 		db:                  db,
 		edgeNodeRepo:        edgeNodeRepo,
@@ -52,10 +50,8 @@ func NewEdgeNodeHandlerWithServices(db *database.DB, edgeNodeRepo *database.Edge
 		alertRepo:           alertRepo,
 		tickets:             tickets,
 		uploadSessions:      uploadSessions,
-		integrationRequests: integrationRequests,
-		providerRepo:        providerRepo,
+		sitePortalRepo:      sitePortalRepo,
 		statusService:       statusService,
-		callbacks:           callbacks,
 	}
 	return h
 }
@@ -71,11 +67,6 @@ func (h *EdgeNodeHandler) settleActiveJobs(nodeID, reason string) error {
 	for _, ref := range refs {
 		if err := h.statusService.ApplyJobResult(ref.ID, ref.EdgeNodeID, ref.PrinterID, "failed", reason, map[string]interface{}{"message": "Edge infrastructure was disabled or deleted"}); err != nil {
 			return err
-		}
-		if h.callbacks != nil {
-			if err := h.callbacks.TransitionForJob(ref.ID, "failed", reason, "Edge infrastructure was disabled or deleted"); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -605,13 +596,13 @@ func (h *EdgeNodeHandler) UpdateLoginSource(c *gin.Context) {
 		return
 	}
 	if req.LoginSource != "official" {
-		if h.providerRepo == nil {
-			InternalErrorResponse(c, "provider repository unavailable")
+		if h.sitePortalRepo == nil {
+			InternalErrorResponse(c, "site portal repository unavailable")
 			return
 		}
-		provider, err := h.providerRepo.Get(req.LoginSource, false)
-		if err != nil || provider == nil || !provider.Enabled {
-			BadRequestResponse(c, "terminal login provider is not enabled")
+		portal, err := h.sitePortalRepo.GetByCode(req.LoginSource)
+		if err != nil || portal == nil || !portal.Enabled {
+			BadRequestResponse(c, "terminal login Site Portal is not enabled")
 			return
 		}
 	}
@@ -657,13 +648,6 @@ func (h *EdgeNodeHandler) DeleteEdgeNode(c *gin.Context) {
 
 	// 1. 先取消仍可被打开或继续处理的临时业务数据。
 	// 历史票据、订单和打印任务保留，避免破坏审计和外部状态查询。
-	if h.integrationRequests != nil {
-		if err := h.integrationRequests.CancelForNodeTx(tx, nodeID); err != nil {
-			logger.Error("Failed to cancel integration requests for node", zap.String("node_id", nodeID), zap.Error(err))
-			InternalErrorResponse(c, "取消节点第三方任务失败")
-			return
-		}
-	}
 	if h.tickets != nil {
 		if err := h.tickets.CancelActiveForNodeTx(tx, nodeID); err != nil {
 			logger.Error("Failed to cancel terminal tickets for node", zap.String("node_id", nodeID), zap.Error(err))

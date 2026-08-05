@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"fly-print-cloud/api/internal/auth"
@@ -24,11 +25,12 @@ func NewOAuth2ClientHandler(clientRepo *database.OAuth2ClientRepository, secretC
 
 // createOAuth2ClientRequest 创建客户端请求
 type createOAuth2ClientRequest struct {
-	ClientID      string `json:"client_id" binding:"required"`
-	ClientType    string `json:"client_type" binding:"required"`
-	EdgeNodeID    string `json:"edge_node_id"`
-	AllowedScopes string `json:"allowed_scopes" binding:"required"`
-	Description   string `json:"description"`
+	ClientID       string `json:"client_id" binding:"required"`
+	ClientType     string `json:"client_type" binding:"required"`
+	EdgeNodeID     string `json:"edge_node_id"`
+	SitePortalCode string `json:"site_portal_code"`
+	AllowedScopes  string `json:"allowed_scopes" binding:"required"`
+	Description    string `json:"description"`
 }
 
 // updateOAuth2ClientRequest 更新客户端请求
@@ -36,6 +38,13 @@ type updateOAuth2ClientRequest struct {
 	AllowedScopes string `json:"allowed_scopes"`
 	Description   string `json:"description"`
 	Enabled       *bool  `json:"enabled"`
+}
+
+func validateOAuth2ClientType(clientType string) error {
+	if clientType != "edge_node" && clientType != "site_portal" {
+		return fmt.Errorf("client_type must be edge_node or site_portal")
+	}
+	return nil
 }
 
 // List 获取客户端列表
@@ -80,8 +89,8 @@ func (h *OAuth2ClientHandler) Create(c *gin.Context) {
 	}
 
 	// 验证 client_type
-	if req.ClientType != "edge_node" && req.ClientType != "third_party" {
-		BadRequestResponse(c, "client_type 必须是 edge_node 或 third_party")
+	if err := validateOAuth2ClientType(req.ClientType); err != nil {
+		BadRequestResponse(c, err.Error())
 		return
 	}
 	if req.ClientType == "edge_node" && req.EdgeNodeID == "" {
@@ -90,6 +99,14 @@ func (h *OAuth2ClientHandler) Create(c *gin.Context) {
 	}
 	if req.ClientType != "edge_node" && req.EdgeNodeID != "" {
 		BadRequestResponse(c, "仅 edge_node 客户端可以绑定 edge_node_id")
+		return
+	}
+	if req.ClientType == "site_portal" && req.SitePortalCode == "" {
+		BadRequestResponse(c, "site_portal 客户端必须绑定 site_portal_code")
+		return
+	}
+	if req.ClientType == "edge_node" && req.SitePortalCode != "" {
+		BadRequestResponse(c, "仅 site_portal 客户端可以绑定 site_portal_code")
 		return
 	}
 
@@ -124,6 +141,9 @@ func (h *OAuth2ClientHandler) Create(c *gin.Context) {
 	if req.EdgeNodeID != "" {
 		client.EdgeNodeID = &req.EdgeNodeID
 	}
+	if req.SitePortalCode != "" {
+		client.SitePortalCode = &req.SitePortalCode
+	}
 
 	if err := h.clientRepo.Create(client); err != nil {
 		InternalErrorResponse(c, "创建客户端失败")
@@ -131,15 +151,16 @@ func (h *OAuth2ClientHandler) Create(c *gin.Context) {
 	}
 
 	CreatedResponse(c, gin.H{
-		"id":             client.ID,
-		"client_id":      client.ClientID,
-		"client_type":    client.ClientType,
-		"edge_node_id":  client.EdgeNodeID,
-		"allowed_scopes": client.AllowedScopes,
-		"description":    client.Description,
-		"enabled":        client.Enabled,
-		"created_at":     client.CreatedAt,
-		"message":        "客户端已创建，可通过复制密钥按钮获取密钥",
+		"id":               client.ID,
+		"client_id":        client.ClientID,
+		"client_type":      client.ClientType,
+		"edge_node_id":     client.EdgeNodeID,
+		"site_portal_code": client.SitePortalCode,
+		"allowed_scopes":   client.AllowedScopes,
+		"description":      client.Description,
+		"enabled":          client.Enabled,
+		"created_at":       client.CreatedAt,
+		"message":          "客户端已创建，可通过复制密钥按钮获取密钥",
 	})
 }
 

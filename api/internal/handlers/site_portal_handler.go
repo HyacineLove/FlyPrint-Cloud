@@ -16,7 +16,7 @@ import (
 const maxPortalClaimTTL = 5 * time.Minute
 
 type sitePortalAuthenticator interface {
-	Authenticate(code, rawToken string) (*models.SitePortal, error)
+	GetByCode(code string) (*models.SitePortal, error)
 }
 
 type portalTicketReader interface {
@@ -24,7 +24,7 @@ type portalTicketReader interface {
 }
 
 type portalSessionMatcher interface {
-	Matches(nodeID, sessionID, ticketHash, integrationRequestID string) (bool, error)
+	Matches(nodeID, sessionID, ticketHash string) (bool, error)
 }
 
 type portalLoginCompleter interface {
@@ -80,13 +80,15 @@ type completePortalLoginRequest struct {
 }
 
 func (h *SitePortalHandler) authenticate(c *gin.Context) (*models.SitePortal, bool) {
+	clientType, _ := c.Get("client_type")
+	portalCode, _ := c.Get("site_portal_code")
 	code := strings.TrimSpace(c.GetHeader("X-FlyPrint-Site-Portal"))
-	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
-	if !strings.HasPrefix(authorization, "Bearer ") {
+	portalCodeString, ok := portalCode.(string)
+	if clientType != "site_portal" || !ok || strings.TrimSpace(portalCodeString) == "" || (code != "" && code != portalCodeString) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "site_portal_unauthorized"})
 		return nil, false
 	}
-	portal, err := h.portals.Authenticate(code, strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")))
+	portal, err := h.portals.GetByCode(strings.TrimSpace(portalCodeString))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "site_portal_unauthorized"})
 		return nil, false
@@ -110,7 +112,7 @@ func (h *SitePortalHandler) Context(c *gin.Context) {
 		c.JSON(http.StatusGone, gin.H{"error": "terminal_ticket_invalid"})
 		return
 	}
-	matched, err := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash, "")
+	matched, err := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash)
 	if err != nil || !matched {
 		c.JSON(http.StatusConflict, gin.H{"error": "terminal_session_invalid"})
 		return
@@ -152,7 +154,7 @@ func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
 		c.JSON(http.StatusGone, gin.H{"error": "terminal_ticket_invalid"})
 		return
 	}
-	matched, err := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash, "")
+	matched, err := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash)
 	if err != nil || !matched {
 		c.JSON(http.StatusConflict, gin.H{"error": "terminal_session_invalid"})
 		return

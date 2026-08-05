@@ -267,9 +267,6 @@ func (h *PrintJobHandler) ListPrintJobs(c *gin.Context) {
 	userEmail := c.Query("user_email")
 	edgeNodeID := c.Query("edge_node_id")
 	initiatorCode := c.Query("initiator_code")
-	if initiatorCode == "" {
-		initiatorCode = c.Query("provider_code")
-	}
 
 	// 时间筛选参数
 	var startTime, endTime *time.Time

@@ -50,7 +50,7 @@ func TestEntryErrorRetryActionIsExplicit(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(recorder)
 	renderEntryError(context, http.StatusServiceUnavailable, "暂时不可用", "请稍后重试。", true)
-	if !strings.Contains(recorder.Body.String(), "重新尝试") {
+	if !strings.Contains(recorder.Body.String(), `onclick="location.reload()"`) {
 		t.Fatal("retryable entry error should render a retry action")
 	}
 }

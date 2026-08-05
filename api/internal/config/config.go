@@ -19,7 +19,6 @@ type Config struct {
 	Admin               AdminConfig               `mapstructure:"admin"`
 	Storage             StorageConfig             `mapstructure:"storage"`
 	Security            SecurityConfig            `mapstructure:"security"`
-	Integration         IntegrationConfig         `mapstructure:"integration"`
 	SitePortalBootstrap SitePortalBootstrapConfig `mapstructure:"site_portal_bootstrap"`
 }
 
@@ -108,19 +107,15 @@ type SecurityConfig struct {
 	DownloadTokenTTL               int    `mapstructure:"download_token_ttl"`
 }
 
-// IntegrationConfig holds shared security infrastructure for third-party APIs.
-type IntegrationConfig struct {
-	RedisURL string `mapstructure:"redis_url"`
-}
-
-// SitePortalBootstrapConfig installs the first Site Portal before Slice 4
-// exposes explicit management APIs.
+// SitePortalBootstrapConfig installs the first Site Portal and its dedicated
+// OAuth client during deployment.
 type SitePortalBootstrapConfig struct {
-	Code         string `mapstructure:"code"`
-	DisplayName  string `mapstructure:"display_name"`
-	EntryURL     string `mapstructure:"entry_url"`
-	ClaimBaseURL string `mapstructure:"claim_base_url"`
-	APIToken     string `mapstructure:"api_token"`
+	Code             string `mapstructure:"code"`
+	DisplayName      string `mapstructure:"display_name"`
+	EntryURL         string `mapstructure:"entry_url"`
+	ClaimBaseURL     string `mapstructure:"claim_base_url"`
+	OAuthClientID    string `mapstructure:"oauth_client_id"`
+	OAuthClientSecret string `mapstructure:"oauth_client_secret"`
 }
 
 // Load 加载配置
@@ -299,7 +294,7 @@ func (c *Config) Validate() error {
 }
 
 func (c SitePortalBootstrapConfig) Validate() error {
-	values := []string{c.Code, c.DisplayName, c.EntryURL, c.ClaimBaseURL, c.APIToken}
+	values := []string{c.Code, c.DisplayName, c.EntryURL, c.ClaimBaseURL, c.OAuthClientID, c.OAuthClientSecret}
 	configured := 0
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -310,7 +305,7 @@ func (c SitePortalBootstrapConfig) Validate() error {
 		return nil
 	}
 	if configured != len(values) {
-		return fmt.Errorf("site_portal_bootstrap requires code, display_name, entry_url, claim_base_url, and api_token")
+		return fmt.Errorf("site_portal_bootstrap requires code, display_name, entry_url, claim_base_url, oauth_client_id, and oauth_client_secret")
 	}
 	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9_-]{1,63}$`, c.Code); !matched {
 		return fmt.Errorf("site_portal_bootstrap.code has an invalid format")
@@ -321,8 +316,8 @@ func (c SitePortalBootstrapConfig) Validate() error {
 			return fmt.Errorf("site_portal_bootstrap.%s must be an absolute HTTP(S) URL", name)
 		}
 	}
-	if len(c.APIToken) < 32 {
-		return fmt.Errorf("site_portal_bootstrap.api_token must be at least 32 characters long")
+	if len(c.OAuthClientID) < 3 || len(c.OAuthClientSecret) < 32 {
+		return fmt.Errorf("site_portal_bootstrap OAuth credentials are invalid")
 	}
 	return nil
 }
@@ -397,12 +392,12 @@ func setDefaults() {
 	viper.SetDefault("security.oauth_client_secret_encryption_key", "")
 	viper.SetDefault("security.upload_token_ttl", 180)   // 3分钟
 	viper.SetDefault("security.download_token_ttl", 180) // 3分钟
-	viper.SetDefault("integration.redis_url", "")
 	viper.SetDefault("site_portal_bootstrap.code", "")
 	viper.SetDefault("site_portal_bootstrap.display_name", "")
 	viper.SetDefault("site_portal_bootstrap.entry_url", "")
 	viper.SetDefault("site_portal_bootstrap.claim_base_url", "")
-	viper.SetDefault("site_portal_bootstrap.api_token", "")
+	viper.SetDefault("site_portal_bootstrap.oauth_client_id", "")
+	viper.SetDefault("site_portal_bootstrap.oauth_client_secret", "")
 }
 
 // GetDSN 获取数据库连接字符串

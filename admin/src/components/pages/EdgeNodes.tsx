@@ -13,7 +13,7 @@ interface EdgeNode {
   version?: string; registration_state: string; login_source?: string; ops_contact_count?: number; printer_count?: number; job_count?: number;
 }
 
-interface IntegrationProvider {
+interface SitePortal {
   code: string;
   display_name: string;
   enabled: boolean;
@@ -38,7 +38,7 @@ const EdgeNodes: React.FC = () => {
   const navigate = useNavigate();
   const nodeFilter = searchParams.get('node_id') || '';
   const [nodes, setNodes] = useState<EdgeNode[]>([]);
-  const [providers, setProviders] = useState<IntegrationProvider[]>([]);
+  const [sitePortals, setSitePortals] = useState<SitePortal[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingLoginSource, setSavingLoginSource] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -50,12 +50,12 @@ const EdgeNodes: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      const [nodeData, providerData] = await Promise.all([
+      const [nodeData, portalData] = await Promise.all([
         request('/admin/edge-nodes?page=1&page_size=100'),
-        request('/admin/integration-providers'),
+        request('/admin/site-portals'),
       ]);
       setNodes(nodeData?.items || []);
-      setProviders(providerData || []);
+      setSitePortals(portalData || []);
     }
     catch { message.error('节点信息加载失败'); }
     finally { setLoading(false); }
@@ -160,10 +160,10 @@ const EdgeNodes: React.FC = () => {
           style={{ minWidth: 150 }}
           options={[
             { value: 'official', label: '官方入口' },
-            ...providers.map(provider => ({
-              value: provider.code,
-              label: provider.display_name,
-              disabled: !provider.enabled,
+            ...sitePortals.map(portal => ({
+              value: portal.code,
+              label: portal.display_name,
+              disabled: !portal.enabled,
             })),
           ]}
           onChange={value => saveLoginSource(node, value)}

@@ -66,15 +66,15 @@ const Login: React.FC = () => {
   };
 
   if (checkingMode) {
-    return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}><Spin size="large" /></div>;
+    return <div className="fp-auth-shell"><Spin size="large" /></div>;
   }
 
   const registerPath = `/register${searchParams.get('return_to') ? `?return_to=${encodeURIComponent(searchParams.get('return_to') || '')}` : ''}`;
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: 'linear-gradient(160deg, #0b1f3a 0%, #1268e8 55%, #3d8bfd 100%)' }}>
-      <Card style={{ width: 400, boxShadow: '0 12px 40px rgba(11, 31, 58, 0.28)', borderRadius: 12, border: 'none' }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+    <div className="fp-auth-shell">
+      <Card className="fp-auth-card">
+        <div className="fp-auth-heading">
           <Title level={3} style={{ marginBottom: 8, color: '#0b1f3a' }}>飞印服务管理中心</Title>
           <Text type="secondary">Cloud 管理端登录</Text>
         </div>

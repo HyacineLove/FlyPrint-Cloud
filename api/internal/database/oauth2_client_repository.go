@@ -22,13 +22,13 @@ func NewOAuth2ClientRepository(db *DB) *OAuth2ClientRepository {
 func (r *OAuth2ClientRepository) GetByClientID(clientID string) (*models.OAuth2Client, error) {
 	client := &models.OAuth2Client{}
 	query := `
-		SELECT id, client_id, client_secret_hash, client_secret_encrypted, client_type, edge_node_id, allowed_scopes,
+		SELECT id, client_id, client_secret_hash, client_secret_encrypted, client_type, edge_node_id, site_portal_code, allowed_scopes,
 		       description, enabled, created_at, updated_at
 		FROM oauth2_clients WHERE client_id = $1`
 
 	err := r.db.QueryRow(query, clientID).Scan(
 		&client.ID, &client.ClientID, &client.ClientSecretHash, &client.ClientSecretEncrypted,
-		&client.ClientType, &client.EdgeNodeID, &client.AllowedScopes, &client.Description,
+		&client.ClientType, &client.EdgeNodeID, &client.SitePortalCode, &client.AllowedScopes, &client.Description,
 		&client.Enabled, &client.CreatedAt, &client.UpdatedAt,
 	)
 	if err != nil {
@@ -44,13 +44,13 @@ func (r *OAuth2ClientRepository) GetByClientID(clientID string) (*models.OAuth2C
 func (r *OAuth2ClientRepository) GetByID(id string) (*models.OAuth2Client, error) {
 	client := &models.OAuth2Client{}
 	query := `
-		SELECT id, client_id, client_secret_hash, client_secret_encrypted, client_type, edge_node_id, allowed_scopes,
+		SELECT id, client_id, client_secret_hash, client_secret_encrypted, client_type, edge_node_id, site_portal_code, allowed_scopes,
 		       description, enabled, created_at, updated_at
 		FROM oauth2_clients WHERE id = $1`
 
 	err := r.db.QueryRow(query, id).Scan(
 		&client.ID, &client.ClientID, &client.ClientSecretHash, &client.ClientSecretEncrypted,
-		&client.ClientType, &client.EdgeNodeID, &client.AllowedScopes, &client.Description,
+		&client.ClientType, &client.EdgeNodeID, &client.SitePortalCode, &client.AllowedScopes, &client.Description,
 		&client.Enabled, &client.CreatedAt, &client.UpdatedAt,
 	)
 	if err != nil {
@@ -62,16 +62,31 @@ func (r *OAuth2ClientRepository) GetByID(id string) (*models.OAuth2Client, error
 	return client, nil
 }
 
+func (r *OAuth2ClientRepository) GetBySitePortalCode(code string) (*models.OAuth2Client, error) {
+	client := &models.OAuth2Client{}
+	err := r.db.QueryRow(`SELECT id,client_id,client_secret_hash,client_secret_encrypted,client_type,edge_node_id,site_portal_code,allowed_scopes,description,enabled,created_at,updated_at
+		FROM oauth2_clients WHERE client_type='site_portal' AND site_portal_code=$1`, code).Scan(
+		&client.ID, &client.ClientID, &client.ClientSecretHash, &client.ClientSecretEncrypted, &client.ClientType,
+		&client.EdgeNodeID, &client.SitePortalCode, &client.AllowedScopes, &client.Description, &client.Enabled, &client.CreatedAt, &client.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("oauth2 client not found")
+		}
+		return nil, fmt.Errorf("failed to get site portal oauth2 client: %w", err)
+	}
+	return client, nil
+}
+
 // Create 创建客户端（client_secret_hash 必须预先通过 bcrypt 哈希）
 func (r *OAuth2ClientRepository) Create(client *models.OAuth2Client) error {
 	query := `
-		INSERT INTO oauth2_clients (client_id, client_secret_hash, client_secret_encrypted, client_type, edge_node_id, allowed_scopes, description, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO oauth2_clients (client_id, client_secret_hash, client_secret_encrypted, client_type, edge_node_id, site_portal_code, allowed_scopes, description, enabled)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at`
 
 	err := r.db.QueryRow(query,
 		client.ClientID, client.ClientSecretHash, client.ClientSecretEncrypted, client.ClientType,
-		client.EdgeNodeID, client.AllowedScopes, client.Description, client.Enabled,
+		client.EdgeNodeID, client.SitePortalCode, client.AllowedScopes, client.Description, client.Enabled,
 	).Scan(&client.ID, &client.CreatedAt, &client.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create oauth2 client: %w", err)
@@ -133,7 +148,7 @@ func (r *OAuth2ClientRepository) List(offset, limit int) ([]*models.OAuth2Client
 	}
 
 	query := `
-		SELECT id, client_id, client_type, edge_node_id, allowed_scopes,
+		SELECT id, client_id, client_type, edge_node_id, site_portal_code, allowed_scopes,
 		       description, enabled, created_at, updated_at
 		FROM oauth2_clients
 		ORDER BY created_at DESC
@@ -149,7 +164,7 @@ func (r *OAuth2ClientRepository) List(offset, limit int) ([]*models.OAuth2Client
 	for rows.Next() {
 		client := &models.OAuth2Client{}
 		if err := rows.Scan(
-			&client.ID, &client.ClientID, &client.ClientType, &client.EdgeNodeID,
+			&client.ID, &client.ClientID, &client.ClientType, &client.EdgeNodeID, &client.SitePortalCode,
 			&client.AllowedScopes, &client.Description, &client.Enabled,
 			&client.CreatedAt, &client.UpdatedAt,
 		); err != nil {
@@ -194,6 +209,22 @@ func (r *OAuth2ClientRepository) IsBoundEdgeNodeUsable(clientID string) (bool, e
 			return false, nil
 		}
 		return false, fmt.Errorf("check bound edge node: %w", err)
+	}
+	return usable, nil
+}
+
+func (r *OAuth2ClientRepository) IsBoundSitePortalUsable(clientID string) (bool, error) {
+	var usable bool
+	err := r.db.QueryRow(`
+		SELECT p.enabled
+		FROM oauth2_clients c
+		JOIN site_portals p ON p.code = c.site_portal_code
+		WHERE c.client_id = $1 AND c.client_type = 'site_portal'`, clientID).Scan(&usable)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("check bound site portal: %w", err)
 	}
 	return usable, nil
 }

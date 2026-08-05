@@ -18,7 +18,8 @@ func main() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	cloud := &cloudClient{
 		baseURL:        strings.TrimRight(config.CloudAPIBaseURL, "/"),
-		sitePortalCode: config.Code, apiToken: config.CloudAPIToken, client: client,
+		sitePortalCode: config.Code, clientID: config.CloudOAuthClientID,
+		clientSecret: config.CloudOAuthClientSecret, client: client,
 	}
 	identity := &identityClient{
 		apiBaseURL:   strings.TrimRight(config.IdentityAPIBaseURL, "/"),
@@ -47,7 +48,8 @@ func portalConfigurationFromEnvironment() (configuration, string, error) {
 		Code:                   strings.TrimSpace(os.Getenv("SITE_PORTAL_CODE")),
 		DisplayName:            strings.TrimSpace(os.Getenv("SITE_PORTAL_DISPLAY_NAME")),
 		CloudAPIBaseURL:        strings.TrimSpace(os.Getenv("SITE_PORTAL_CLOUD_API_BASE")),
-		CloudAPIToken:          os.Getenv("SITE_PORTAL_CLOUD_API_TOKEN"),
+		CloudOAuthClientID:     strings.TrimSpace(os.Getenv("SITE_PORTAL_CLOUD_CLIENT_ID")),
+		CloudOAuthClientSecret: os.Getenv("SITE_PORTAL_CLOUD_CLIENT_SECRET"),
 		IdentityBrowserBaseURL: strings.TrimSpace(os.Getenv("SITE_PORTAL_IDENTITY_BROWSER_BASE_URL")),
 		IdentityAPIBaseURL:     strings.TrimSpace(os.Getenv("SITE_PORTAL_IDENTITY_API_BASE_URL")),
 		IdentityClientSecret:   os.Getenv("SITE_PORTAL_IDENTITY_CLIENT_SECRET"),

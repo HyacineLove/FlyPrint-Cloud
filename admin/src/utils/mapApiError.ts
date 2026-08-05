@@ -25,8 +25,8 @@ const PHRASE_MESSAGES: Array<[RegExp | string, string]> = [
   ['download_token_ttl_seconds must be greater than 0', '下载凭证有效期必须大于 0'],
   ['allowed_extensions must not be empty', '允许的文件扩展名不能为空'],
   ['display_name is required', '请填写显示名称'],
-  ['invalid integration provider configuration', '第三方接入配置无效'],
-  ['integration provider not found', '第三方接入配置不存在'],
+  ['invalid Site Portal configuration', 'Site Portal 配置无效'],
+  ['Site Portal not found', 'Site Portal 不存在'],
   ['Failed to fetch', '网络连接失败，请检查网络后重试'],
   ['Network Error', '网络连接失败，请检查网络后重试'],
 ];
