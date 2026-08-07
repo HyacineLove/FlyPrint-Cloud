@@ -129,6 +129,9 @@ func TestPDFUploadListDownloadIsUserIsolated(t *testing.T) {
 	if downloadResponse.Header().Get("X-Content-SHA256") != pdfFixtureSHA256 {
 		t.Fatalf("download sha256=%q", downloadResponse.Header().Get("X-Content-SHA256"))
 	}
+	if downloadResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("download cache-control=%q", downloadResponse.Header().Get("Cache-Control"))
+	}
 	if downloadResponse.Header().Get("Content-Type") != "application/pdf" ||
 		downloadResponse.Header().Get("Content-Length") != strconv.Itoa(len(pdfFixture)) ||
 		!strings.Contains(downloadResponse.Header().Get("Content-Disposition"), "sample.pdf") {

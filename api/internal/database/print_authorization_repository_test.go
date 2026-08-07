@@ -23,6 +23,8 @@ func authorizationInput() models.PrintAuthorizationInput {
 		PageCount:         3,
 		Copies:            2,
 		PaperSize:         "A4",
+		Orientation:       "landscape",
+		ScalePercent:      120,
 		ColorMode:         "color",
 		DuplexMode:        "longedge",
 		PrinterID:         "11111111-1111-1111-1111-111111111111",
@@ -99,13 +101,13 @@ func TestPrintAuthorizationRepositoryCreatesFilelessAuditAndReservesQuota(t *tes
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO print_jobs (
 		name,status,printer_id,user_id,user_name,file_path,file_url,content_hash,
-		page_count,copies,paper_size,color_mode,duplex_mode,retry_count,max_retries,
+		page_count,copies,paper_size,orientation,scale_percent,color_mode,duplex_mode,retry_count,max_retries,
 		edge_node_id,site_portal_code,terminal_session_id,confirmation_id,
 		authorization_request_hash,local_file_id,quota_reserved,created_at,updated_at
 	) VALUES (
 		$1,'pending',$2::uuid,$3,$4,'','','',
-		$5,$6,$7,$8,$9,0,0,
-		$10,$11,$12,$13,$14,$15,$16,$17,$17
+		$5,$6,$7,$8,$9,$10,$11,0,0,
+		$12,$13,$14,$15,$16,$17,$18,$19,$19
 	) RETURNING id::text`)).
 		WithArgs(
 			"课件.pdf",
@@ -115,6 +117,8 @@ func TestPrintAuthorizationRepositoryCreatesFilelessAuditAndReservesQuota(t *tes
 			3,
 			2,
 			"A4",
+			"landscape",
+			120,
 			"color",
 			"longedge",
 			input.NodeID,
@@ -224,5 +228,46 @@ func TestPrintAuthorizationRepositoryRejectsConflictingConfirmation(t *testing.T
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPrintAuthorizationRepositoryRejectsInvalidLayoutOptionsBeforeOpeningTransaction(t *testing.T) {
+	db, mock, closeDB := newUserRepositoryTestDB(t)
+	defer closeDB()
+	repo := NewPrintAuthorizationRepository(db)
+
+	invalidOrientation := authorizationInput()
+	invalidOrientation.Orientation = "diagonal"
+	if _, err := repo.Authorize(invalidOrientation); !errors.Is(err, ErrPrintAuthorizationInvalid) {
+		t.Fatalf("orientation error = %v, want ErrPrintAuthorizationInvalid", err)
+	}
+
+	invalidScale := authorizationInput()
+	invalidScale.ScalePercent = 55
+	if _, err := repo.Authorize(invalidScale); !errors.Is(err, ErrPrintAuthorizationInvalid) {
+		t.Fatalf("scale error = %v, want ErrPrintAuthorizationInvalid", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrintAuthorizationRequestHashIncludesLayoutOptions(t *testing.T) {
+	input := authorizationInput()
+	input.Orientation = "portrait"
+	input.ScalePercent = 100
+	portraitHash := PrintAuthorizationRequestHash(input)
+
+	landscape := input
+	landscape.Orientation = "landscape"
+	if PrintAuthorizationRequestHash(landscape) == portraitHash {
+		t.Fatal("orientation must change the authorization request hash")
+	}
+
+	scaled := input
+	scaled.ScalePercent = 80
+	if PrintAuthorizationRequestHash(scaled) == portraitHash {
+		t.Fatal("scale_percent must change the authorization request hash")
 	}
 }

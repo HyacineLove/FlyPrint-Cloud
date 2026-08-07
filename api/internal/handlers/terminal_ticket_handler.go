@@ -72,7 +72,7 @@ func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
 	}
 	portal, err := h.sitePortals.GetDefaultForNode(ticket.NodeID)
 	if err != nil || portal == nil {
-		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal login source is not configured correctly.", true)
+		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal Site Portal configuration is not available.", true)
 		return
 	}
 	printer, err := h.printers.GetPrinterByID(ticket.PrinterID)
@@ -121,14 +121,10 @@ func (h *TerminalTicketHandler) SelectEntry(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_terminal_entry"})
 		return
 	}
-	var portal *models.SitePortal
-	var err error
-	if req.Entry != "official" {
-		portal, err = h.sitePortals.GetByCode(req.Entry)
-		if err != nil || portal == nil || !portal.Enabled {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "terminal_entry_unavailable"})
-			return
-		}
+	portal, err := h.sitePortals.GetByCode(req.Entry)
+	if err != nil || portal == nil || !portal.Enabled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal_entry_unavailable"})
+		return
 	}
 	ticket, err := h.tickets.GetValidByHash(ticketHash(req.TerminalTicket), time.Now())
 	if err != nil {
@@ -150,6 +146,15 @@ func (h *TerminalTicketHandler) SelectEntry(c *gin.Context) {
 	printer, err := h.printers.GetPrinterByID(ticket.PrinterID)
 	if err != nil || printer == nil || printer.EdgeNodeID != ticket.NodeID || !printer.Enabled {
 		c.JSON(http.StatusForbidden, gin.H{"error": "printer_unavailable"})
+		return
+	}
+	assigned, assignmentErr := h.sitePortals.IsAssignedToNode(ticket.NodeID, req.Entry)
+	if assignmentErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "terminal_entry_unavailable"})
+		return
+	}
+	if !assigned {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "terminal_entry_unavailable"})
 		return
 	}
 	ticket, err = h.tickets.Select(ticketHash(req.TerminalTicket), req.Entry, time.Now())

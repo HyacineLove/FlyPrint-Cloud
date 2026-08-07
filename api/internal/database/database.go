@@ -133,7 +133,6 @@ func (db *DB) InitTables() error {
 	CREATE TABLE IF NOT EXISTS edge_nodes (
 		id VARCHAR(100) PRIMARY KEY,
 		name VARCHAR(100) NOT NULL, -- User-friendly display name (can be modified)
-		login_source VARCHAR(100) NOT NULL DEFAULT 'official',
 		status VARCHAR(20) NOT NULL DEFAULT 'offline',
 		health_status VARCHAR(20) NOT NULL DEFAULT 'unknown',
 		health_reason_code VARCHAR(100),
@@ -262,6 +261,8 @@ func (db *DB) InitTables() error {
 		
 		-- 打印设置
 		paper_size VARCHAR(20),
+		orientation VARCHAR(16) NOT NULL DEFAULT 'portrait',
+		scale_percent INTEGER NOT NULL DEFAULT 100,
 		color_mode VARCHAR(20),
 		duplex_mode VARCHAR(20),
 		
@@ -285,6 +286,12 @@ func (db *DB) InitTables() error {
 
 	if _, err := db.Exec("ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);"); err != nil {
 		return fmt.Errorf("failed to migrate print_jobs table: %w", err)
+	}
+	if _, err := db.Exec("ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS orientation VARCHAR(16) NOT NULL DEFAULT 'portrait';"); err != nil {
+		return fmt.Errorf("failed to migrate print_jobs orientation: %w", err)
+	}
+	if _, err := db.Exec("ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS scale_percent INTEGER NOT NULL DEFAULT 100;"); err != nil {
+		return fmt.Errorf("failed to migrate print_jobs scale_percent: %w", err)
 	}
 
 	operationalAlertsSQL := `
@@ -373,7 +380,6 @@ func (db *DB) InitTables() error {
 		"ALTER TABLE token_usage_records ALTER COLUMN used_at DROP NOT NULL;",
 		"ALTER TABLE token_usage_records ALTER COLUMN used_at DROP DEFAULT;",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS health_status VARCHAR(20) NOT NULL DEFAULT 'unknown';",
-		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS login_source VARCHAR(100) NOT NULL DEFAULT 'official';",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS health_reason_code VARCHAR(100);",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS health_message TEXT;",
 		"ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS cpu_usage DOUBLE PRECISION DEFAULT 0;",

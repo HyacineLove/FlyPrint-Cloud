@@ -7,7 +7,6 @@ import (
 // EdgeNode Edge节点
 type EdgeNode struct {
 	ID                      string     `json:"id"`
-	LoginSource             string     `json:"login_source"`
 	Name                    string     `json:"name"`            // Edge 上报的原始名称
 	Alias                   string     `json:"alias,omitempty"` // Cloud 运维别名
 	RegistrationState       string     `json:"registration_state"`
@@ -117,6 +116,8 @@ type PrintJob struct {
 
 	// 打印设置
 	PaperSize            string `json:"paper_size"`
+	Orientation          string `json:"orientation"`
+	ScalePercent         int    `json:"scale_percent"`
 	ColorMode            string `json:"color_mode"`  // color/grayscale
 	DuplexMode           string `json:"duplex_mode"` // single/duplex
 	QuotaReserved        int    `json:"quota_reserved"`

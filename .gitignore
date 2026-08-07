@@ -40,5 +40,6 @@ nul
 
 # Release deploy bundle (local secrets / large artifacts; do not commit)
 deploy/release/.env
+deploy/server.env
 deploy/release/CREDENTIALS.txt
 deploy/release/flyprint-images.tar

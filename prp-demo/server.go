@@ -200,6 +200,7 @@ func (s *server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", stored.MediaType)
 	w.Header().Set("Content-Length", strconv.FormatInt(stored.Size, 10))
 	w.Header().Set("X-Content-SHA256", stored.SHA256)
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	written, copyErr := io.Copy(w, file)
 	if copyErr == nil && written == stored.Size {

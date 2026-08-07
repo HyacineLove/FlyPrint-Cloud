@@ -51,11 +51,11 @@ type PreviewFilePayload struct {
 
 // SubmitPrintParamsPayload 提交打印参数载荷
 type SubmitPrintParamsPayload struct {
-	FileID               string                 `json:"file_id"`
-	PrinterID            string                 `json:"printer_id"`
-	Options              map[string]interface{} `json:"options"` // copies, color, duplex, paper_size, etc.
-	TerminalSessionID    string                 `json:"terminal_session_id,omitempty"`
-	TerminalTicketHash   string                 `json:"terminal_ticket_hash,omitempty"`
+	FileID             string                 `json:"file_id"`
+	PrinterID          string                 `json:"printer_id"`
+	Options            map[string]interface{} `json:"options"` // copies, color, duplex, paper_size, etc.
+	TerminalSessionID  string                 `json:"terminal_session_id,omitempty"`
+	TerminalTicketHash string                 `json:"terminal_ticket_hash,omitempty"`
 }
 
 // PrintJobPayload 打印任务指令载荷
@@ -143,6 +143,8 @@ type PrintJobData struct {
 	PageCount                int        `json:"page_count"`
 	Copies                   int        `json:"copies"`
 	PaperSize                string     `json:"paper_size"`
+	Orientation              string     `json:"orientation"`
+	ScalePercent             int        `json:"scale_percent"`
 	ColorMode                string     `json:"color_mode"`
 	DuplexMode               string     `json:"duplex_mode"`
 	MaxRetries               int        `json:"max_retries"`
@@ -160,9 +162,9 @@ type RequestUploadTokenPayload struct {
 // local interactive session. Empty fields explicitly mean Edge has no active
 // session (including immediately after restart).
 type TerminalSessionStateData struct {
-	TerminalSessionID    string `json:"terminal_session_id"`
-	TerminalTicketHash   string `json:"terminal_ticket_hash"`
-	EntryType            string `json:"entry_type"`
+	TerminalSessionID  string `json:"terminal_session_id"`
+	TerminalTicketHash string `json:"terminal_ticket_hash"`
+	EntryType          string `json:"entry_type"`
 }
 
 // TerminalOccupiedPayload tells Edge a phone has entered via the current QR

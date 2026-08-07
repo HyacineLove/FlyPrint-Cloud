@@ -9,7 +9,6 @@ const node = {
   name: '终端一号',
   alias: '',
   location: '一楼',
-  login_source: 'official',
   connection_status: 'online',
   health_status: 'healthy',
   enabled: true,
@@ -18,20 +17,18 @@ const node = {
 };
 
 const sitePortal = {
-  id: 'site-portal-1',
   code: 'campus-print',
   display_name: '校园入口',
   enabled: true,
-  entry_visible: true,
 };
 
-const response = (data: unknown, ok = true) => ({
+const response = (data: unknown, ok = true, message?: string) => ({
   ok,
   status: ok ? 200 : 400,
-  json: async () => ({ code: ok ? 200 : 400, data }),
+  json: async () => ({ code: ok ? 200 : 400, data, message }),
 }) as Response;
 
-describe('EdgeNodes login source', () => {
+describe('EdgeNodes Site Portal configuration', () => {
   beforeAll(() => {
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -48,31 +45,22 @@ describe('EdgeNodes login source', () => {
     });
   });
 
-  it('shows the official and enabled Site Portal login sources', async () => {
-    global.fetch = jest.fn().mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
-      if (url.includes('/admin/edge-nodes')) return response({ items: [node], total: 1 });
-      if (url.includes('/admin/site-portals')) return response([sitePortal]);
-      return response({});
-    }) as jest.Mock;
-
-    render(<MemoryRouter><EdgeNodes /></MemoryRouter>);
-
-    expect((await screen.findAllByText('登录源')).length).toBeGreaterThan(0);
-    const sourceSelect = await screen.findByTestId('node-login-source-node-1');
-    expect(sourceSelect).toHaveAttribute('aria-label', '节点 终端一号 登录源');
-    expect(screen.getByText('官方入口')).toBeInTheDocument();
-
-    fireEvent.mouseDown(sourceSelect.querySelector('.ant-select-selector') as HTMLElement);
-    expect(await screen.findByText('校园入口')).toBeInTheDocument();
-  });
-
-  it('updates the node login source through the existing admin endpoint', async () => {
+  it('loads the node Portal configuration and saves the selected set/default', async () => {
     const fetchMock = jest.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
-      if (url.includes('/admin/edge-nodes') && init?.method === 'PATCH') return response({ id: node.id, login_source: sitePortal.code });
+      if (url.includes('/admin/edge-nodes/node-1/site-portals')) {
+        if (init?.method === 'PUT') return response({
+          edge_node_id: 'node-1',
+          portals: [sitePortal],
+          default_code: 'campus-print',
+        });
+        return response({
+          edge_node_id: 'node-1',
+          portals: [sitePortal],
+          default_code: 'campus-print',
+        });
+      }
       if (url.includes('/admin/edge-nodes')) return response({ items: [node], total: 1 });
       if (url.includes('/admin/site-portals')) return response([sitePortal]);
       return response({});
@@ -81,15 +69,16 @@ describe('EdgeNodes login source', () => {
 
     render(<MemoryRouter><EdgeNodes /></MemoryRouter>);
 
-    const sourceSelect = await screen.findByTestId('node-login-source-node-1');
-    fireEvent.mouseDown(sourceSelect.querySelector('.ant-select-selector') as HTMLElement);
-    fireEvent.click(await screen.findByText('校园入口'));
+    const configButton = await screen.findByTestId('node-site-portals-node-1');
+    fireEvent.click(configButton);
+    expect((await screen.findAllByText('校园入口')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '保存配置' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/admin/edge-nodes/node-1/login-source'),
+      expect.stringContaining('/admin/edge-nodes/node-1/site-portals'),
       expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ login_source: 'campus-print' }),
+        method: 'PUT',
+        body: JSON.stringify({ portal_codes: ['campus-print'], default_code: 'campus-print' }),
       }),
     ));
   });

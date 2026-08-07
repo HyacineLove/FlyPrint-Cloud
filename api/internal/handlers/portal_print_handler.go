@@ -33,6 +33,8 @@ type portalPrintAuthorizationRequest struct {
 	PageCount         int    `json:"page_count" binding:"required,min=1,max=1000"`
 	Copies            int    `json:"copies" binding:"required,min=1,max=99"`
 	PaperSize         string `json:"paper_size" binding:"required,min=1,max=20"`
+	Orientation       string `json:"orientation"`
+	ScalePercent      int    `json:"scale_percent"`
 	ColorMode         string `json:"color_mode" binding:"required,oneof=mono color"`
 	DuplexMode        string `json:"duplex_mode" binding:"required,oneof=simplex longedge shortedge"`
 	PrinterID         string `json:"printer_id" binding:"required,uuid"`
@@ -58,6 +60,8 @@ func (h *PortalPrintHandler) Authorize(c *gin.Context) {
 		PageCount:         request.PageCount,
 		Copies:            request.Copies,
 		PaperSize:         strings.TrimSpace(request.PaperSize),
+		Orientation:       strings.TrimSpace(request.Orientation),
+		ScalePercent:      request.ScalePercent,
 		ColorMode:         request.ColorMode,
 		DuplexMode:        request.DuplexMode,
 		PrinterID:         request.PrinterID,

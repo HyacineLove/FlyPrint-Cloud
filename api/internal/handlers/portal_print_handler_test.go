@@ -50,6 +50,8 @@ const validPrintAuthorizationBody = `{
 	"page_count":3,
 	"copies":2,
 	"paper_size":"A4",
+	"orientation":"landscape",
+	"scale_percent":120,
 	"color_mode":"color",
 	"duplex_mode":"longedge",
 	"printer_id":"11111111-1111-1111-1111-111111111111"
@@ -69,6 +71,9 @@ func TestPortalPrintHandlerReturnsAuthorizationResult(t *testing.T) {
 	}
 	if authorizer.input.NodeID != "edge-1" || authorizer.input.SitePortalCode != "official" {
 		t.Fatalf("authorizer input = %#v", authorizer.input)
+	}
+	if authorizer.input.Orientation != "landscape" || authorizer.input.ScalePercent != 120 {
+		t.Fatalf("layout options were not forwarded: %#v", authorizer.input)
 	}
 	expected := `{"allowed":true,"job_id":"33333333-3333-3333-3333-333333333333","quota_balance":42,"reserved_quota":8}`
 	if recorder.Body.String() != expected {

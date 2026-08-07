@@ -43,8 +43,8 @@ func newMockState() *mockState {
 	stamp := func(delta time.Duration) string { return t.Add(delta).Format(time.RFC3339) }
 	return &mockState{
 		nodes: []map[string]any{
-			{"id": "node-demo-001", "name": "大厅自助终端", "alias": "大厅 01", "location": "一楼大厅", "connection_status": "online", "health_status": "healthy", "health_message": "心跳正常", "enabled": true, "last_heartbeat": stamp(-20 * time.Second), "version": "1.0.52", "registration_state": "active", "login_source": "official", "ops_contact_count": 2, "printer_count": 1, "job_count": 4},
-			{"id": "node-demo-002", "name": "二楼服务台", "alias": "二楼 01", "location": "二楼服务台", "connection_status": "unstable", "health_status": "degraded", "health_message": "最近心跳延迟", "enabled": true, "last_heartbeat": stamp(-2 * time.Minute), "version": "1.0.49", "registration_state": "active", "login_source": "official", "ops_contact_count": 1, "printer_count": 1, "job_count": 2},
+			{"id": "node-demo-001", "name": "大厅自助终端", "alias": "大厅 01", "location": "一楼大厅", "connection_status": "online", "health_status": "healthy", "health_message": "心跳正常", "enabled": true, "last_heartbeat": stamp(-20 * time.Second), "version": "1.0.52", "registration_state": "active", "site_portal_codes": []string{"official"}, "default_code": "official", "ops_contact_count": 2, "printer_count": 1, "job_count": 4},
+			{"id": "node-demo-002", "name": "二楼服务台", "alias": "二楼 01", "location": "二楼服务台", "connection_status": "unstable", "health_status": "degraded", "health_message": "最近心跳延迟", "enabled": true, "last_heartbeat": stamp(-2 * time.Minute), "version": "1.0.49", "registration_state": "active", "site_portal_codes": []string{"official"}, "default_code": "official", "ops_contact_count": 1, "printer_count": 1, "job_count": 2},
 		},
 		printers: []map[string]any{
 			{"id": "printer-demo-001", "name": "HP LaserJet M404", "display_name": "大厅黑白打印机", "model": "HP LaserJet Pro M404", "printer_status": "idle", "enabled": true, "edge_node_id": "node-demo-001", "job_count": 4},
@@ -66,7 +66,7 @@ func newMockState() *mockState {
 			{"id": "contact-demo-002", "name": "李工", "phone": "139****8002", "enabled": true, "node_ids": []string{"node-demo-001", "node-demo-002"}},
 		},
 		sitePortals: []map[string]any{
-			{"code": "official", "display_name": "官方站点入口（演示）", "entry_url": "http://127.0.0.1:8099/site-portal/entry", "claim_base_url": "http://127.0.0.1:8099/site-portal", "enabled": true, "oauth_client_id": "flyprint-demo-client", "oauth_client_enabled": true},
+			{"code": "official", "display_name": "官方站点入口（演示）", "entry_url": "http://127.0.0.1:8099/site-portal/entry", "claim_base_url": "http://127.0.0.1:8099/site-portal", "enabled": true, "oauth_client_id": "flyprint-demo-client", "oauth_client_enabled": true, "edge_node_count": 2},
 		},
 		clients: []map[string]any{
 			{"id": "oauth-demo-001", "client_id": "flyprint-demo-client", "client_type": "site_portal", "site_portal_code": "official", "allowed_scopes": []string{"site-portal:access"}, "description": "演示 Site Portal 客户端", "enabled": true},
@@ -293,6 +293,24 @@ func (s *server) sitePortalMutation(w http.ResponseWriter, r *http.Request, suff
 	writeJSON(w, http.StatusNotFound, map[string]any{"code": 404, "message": "mock site portal not found"})
 }
 
+func (s *server) sitePortalConfig(node map[string]any) map[string]any {
+	codes, _ := node["site_portal_codes"].([]string)
+	portals := make([]map[string]any, 0, len(codes))
+	for _, code := range codes {
+		for _, portal := range s.state.sitePortals {
+			if portal["code"] == code {
+				portals = append(portals, portal)
+				break
+			}
+		}
+	}
+	return map[string]any{
+		"edge_node_id": node["id"],
+		"portals":      portals,
+		"default_code": node["default_code"],
+	}
+}
+
 func (s *server) edgeNodeMutation(w http.ResponseWriter, r *http.Request, suffix string) {
 	parts := strings.Split(strings.Trim(suffix, "/"), "/")
 	if len(parts) < 1 {
@@ -309,10 +327,21 @@ func (s *server) edgeNodeMutation(w http.ResponseWriter, r *http.Request, suffix
 			node["alias"] = readJSON(r)["alias"]
 		case len(parts) == 2 && parts[1] == "enabled":
 			node["enabled"] = readJSON(r)["enabled"]
-		case len(parts) == 2 && parts[1] == "login-source":
+		case len(parts) == 2 && parts[1] == "site-portals":
+			if r.Method == http.MethodGet {
+				writeJSON(w, http.StatusOK, envelope(s.sitePortalConfig(node)))
+				return
+			}
 			payload := readJSON(r)
-			node["login_source"] = payload["login_source"]
-			writeJSON(w, http.StatusOK, envelope(map[string]any{"login_source": node["login_source"]}))
+			codes := make([]string, 0)
+			for _, raw := range payload["portal_codes"].([]any) {
+				if code, ok := raw.(string); ok {
+					codes = append(codes, code)
+				}
+			}
+			node["site_portal_codes"] = codes
+			node["default_code"] = payload["default_code"]
+			writeJSON(w, http.StatusOK, envelope(s.sitePortalConfig(node)))
 			return
 		case r.Method == http.MethodDelete:
 			deleteByID(&s.state.nodes, id)

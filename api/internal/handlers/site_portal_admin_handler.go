@@ -26,10 +26,15 @@ func NewSitePortalAdminHandler(portals *database.SitePortalRepository, clients *
 }
 
 type sitePortalAdminRequest struct {
-	Code         string `json:"code" binding:"required"`
+	Code         string `json:"code"`
 	DisplayName  string `json:"display_name" binding:"required"`
 	EntryURL     string `json:"entry_url" binding:"required"`
 	ClaimBaseURL string `json:"claim_base_url" binding:"required"`
+}
+
+type edgeSitePortalConfigRequest struct {
+	PortalCodes       []string `json:"portal_codes"`
+	DefaultPortalCode string   `json:"default_code"`
 }
 
 func validateSitePortalAdminRequest(req sitePortalAdminRequest) error {
@@ -144,6 +149,10 @@ func (h *SitePortalAdminHandler) SetEnabled(c *gin.Context) {
 		return
 	}
 	if err := h.portals.SetEnabled(strings.TrimSpace(c.Param("code")), enabled.Enabled); err != nil {
+		if errors.Is(err, database.ErrSitePortalAssigned) {
+			c.JSON(409, gin.H{"code": 409, "message": "请先移除使用该 Portal 的 Edge 关联"})
+			return
+		}
 		NotFoundResponse(c, "Site Portal not found")
 		return
 	}
@@ -190,4 +199,83 @@ func (h *SitePortalAdminHandler) RotateSecret(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	SuccessResponse(c, gin.H{"client_id": client.ClientID, "client_secret": rawSecret})
+}
+
+func validateEdgeSitePortalConfig(req edgeSitePortalConfigRequest) error {
+	if len(req.PortalCodes) == 0 {
+		return fmt.Errorf("至少选择一个 Site Portal")
+	}
+	seen := make(map[string]struct{}, len(req.PortalCodes))
+	for _, raw := range req.PortalCodes {
+		code := strings.TrimSpace(raw)
+		if !sitePortalCodePattern.MatchString(code) {
+			return fmt.Errorf("Site Portal 编码无效")
+		}
+		if _, exists := seen[code]; exists {
+			return fmt.Errorf("Site Portal 不能重复选择")
+		}
+		seen[code] = struct{}{}
+	}
+	if !sitePortalCodePattern.MatchString(strings.TrimSpace(req.DefaultPortalCode)) {
+		return fmt.Errorf("默认 Site Portal 编码无效")
+	}
+	if _, ok := seen[strings.TrimSpace(req.DefaultPortalCode)]; !ok {
+		return database.ErrDefaultPortalNotAssigned
+	}
+	return nil
+}
+
+func (h *SitePortalAdminHandler) GetEdgeSitePortals(c *gin.Context) {
+	config, err := h.portals.GetEdgeSitePortalConfig(strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		if errors.Is(err, database.ErrEdgeNodeNotFound) {
+			NotFoundResponse(c, "Edge Node not found")
+			return
+		}
+		InternalErrorResponse(c, "failed to get Edge Site Portal configuration")
+		return
+	}
+	SuccessResponse(c, config)
+}
+
+func (h *SitePortalAdminHandler) UpdateEdgeSitePortals(c *gin.Context) {
+	var req edgeSitePortalConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ValidationErrorResponse(c, err)
+		return
+	}
+	req.DefaultPortalCode = strings.TrimSpace(req.DefaultPortalCode)
+	for i := range req.PortalCodes {
+		req.PortalCodes[i] = strings.TrimSpace(req.PortalCodes[i])
+	}
+	if err := validateEdgeSitePortalConfig(req); err != nil {
+		switch {
+		case errors.Is(err, database.ErrDefaultPortalNotAssigned):
+			c.JSON(409, gin.H{"code": 409, "message": "默认 Site Portal 必须属于可选列表"})
+		default:
+			BadRequestResponse(c, err.Error())
+		}
+		return
+	}
+	if err := h.portals.ReplaceEdgeSitePortals(strings.TrimSpace(c.Param("id")), req.PortalCodes, req.DefaultPortalCode); err != nil {
+		switch {
+		case errors.Is(err, database.ErrEdgeNodeNotFound):
+			NotFoundResponse(c, "Edge Node not found")
+		case errors.Is(err, database.ErrSitePortalNotFound):
+			BadRequestResponse(c, "Site Portal 不存在")
+		case errors.Is(err, database.ErrSitePortalDisabled):
+			BadRequestResponse(c, "Site Portal 未启用")
+		case errors.Is(err, database.ErrDefaultPortalNotAssigned):
+			c.JSON(409, gin.H{"code": 409, "message": "默认 Site Portal 必须属于可选列表"})
+		default:
+			InternalErrorResponse(c, "failed to update Edge Site Portal configuration")
+		}
+		return
+	}
+	config, err := h.portals.GetEdgeSitePortalConfig(strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		InternalErrorResponse(c, "failed to read Edge Site Portal configuration")
+		return
+	}
+	SuccessResponse(c, config)
 }

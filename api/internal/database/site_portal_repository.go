@@ -4,14 +4,22 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"fly-print-cloud/api/internal/models"
+
+	"github.com/lib/pq"
 )
 
 var (
-	ErrSitePortalUnauthorized = errors.New("site portal unauthorized")
-	ErrSitePortalHasMappings  = errors.New("site portal has identity mappings")
-	ErrSitePortalAssigned     = errors.New("site portal is assigned to an edge node")
+	ErrSitePortalUnauthorized   = errors.New("site portal unauthorized")
+	ErrSitePortalHasMappings    = errors.New("site portal has identity mappings")
+	ErrSitePortalAssigned       = errors.New("site portal is assigned to an edge node")
+	ErrEdgeNodeNotFound         = errors.New("edge node not found")
+	ErrSitePortalNotFound       = errors.New("site portal not found")
+	ErrSitePortalDisabled       = errors.New("site portal is disabled")
+	ErrDefaultPortalNotAssigned = errors.New("default site portal is not assigned to the edge node")
 )
 
 type SitePortalRepository struct {
@@ -71,7 +79,8 @@ func (r *SitePortalRepository) getByCode(code string, enabledOnly bool) (*models
 
 func (r *SitePortalRepository) ListAll() ([]*models.SitePortal, error) {
 	rows, err := r.db.Query(`SELECT p.code,p.display_name,p.entry_url,p.claim_base_url,p.enabled,
-		p.created_at,p.updated_at,COALESCE(c.client_id,''),COALESCE(c.enabled,false)
+		p.created_at,p.updated_at,COALESCE(c.client_id,''),COALESCE(c.enabled,false),
+		(SELECT COUNT(*) FROM edge_site_portals assignment WHERE assignment.site_portal_code=p.code)
 		FROM site_portals p LEFT JOIN oauth2_clients c
 			ON c.site_portal_code=p.code AND c.client_type='site_portal'
 		ORDER BY p.created_at DESC`)
@@ -83,7 +92,8 @@ func (r *SitePortalRepository) ListAll() ([]*models.SitePortal, error) {
 	for rows.Next() {
 		portal := &models.SitePortal{}
 		if err := rows.Scan(&portal.Code, &portal.DisplayName, &portal.EntryURL, &portal.ClaimBaseURL,
-			&portal.Enabled, &portal.CreatedAt, &portal.UpdatedAt, &portal.OAuthClientID, &portal.OAuthClientEnabled); err != nil {
+			&portal.Enabled, &portal.CreatedAt, &portal.UpdatedAt, &portal.OAuthClientID, &portal.OAuthClientEnabled,
+			&portal.EdgeNodeCount); err != nil {
 			return nil, fmt.Errorf("scan site portal: %w", err)
 		}
 		portals = append(portals, portal)
@@ -117,6 +127,22 @@ func (r *SitePortalRepository) SetEnabled(code string, enabled bool) error {
 			_ = tx.Rollback()
 		}
 	}()
+	if !enabled {
+		var existingCode string
+		if err := tx.QueryRow(`SELECT code FROM site_portals WHERE code=$1 FOR UPDATE`, code).Scan(&existingCode); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("site portal not found")
+			}
+			return fmt.Errorf("lock Site Portal: %w", err)
+		}
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM edge_site_portals WHERE site_portal_code=$1`, code).Scan(&count); err != nil {
+			return fmt.Errorf("check Site Portal assignments: %w", err)
+		}
+		if count > 0 {
+			return ErrSitePortalAssigned
+		}
+	}
 	result, err := tx.Exec(`UPDATE site_portals SET enabled=$2,updated_at=CURRENT_TIMESTAMP WHERE code=$1`, code, enabled)
 	if err != nil {
 		return fmt.Errorf("update site portal state: %w", err)
@@ -155,7 +181,7 @@ func (r *SitePortalRepository) Delete(code string) error {
 	if count > 0 {
 		return ErrSitePortalHasMappings
 	}
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM edge_nodes WHERE default_site_portal_code=$1 AND deleted_at IS NULL`, code).Scan(&count); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM edge_site_portals WHERE site_portal_code=$1`, code).Scan(&count); err != nil {
 		return fmt.Errorf("check Site Portal assignments: %w", err)
 	}
 	if count > 0 {
@@ -210,7 +236,8 @@ func (r *SitePortalRepository) GetDefaultForNode(nodeID string) (*models.SitePor
 	portal, err := scanSitePortal(r.db.QueryRow(`SELECT portal.code,portal.display_name,portal.entry_url,portal.claim_base_url,
 		portal.enabled,portal.created_at,portal.updated_at
 		FROM edge_nodes node
-		JOIN site_portals portal ON portal.code=node.default_site_portal_code
+		JOIN edge_site_portals assignment ON assignment.edge_node_id=node.id AND assignment.is_default=true
+		JOIN site_portals portal ON portal.code=assignment.site_portal_code
 		WHERE node.id=$1 AND node.deleted_at IS NULL AND node.enabled=true AND portal.enabled=true`, nodeID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -236,17 +263,181 @@ func (r *SitePortalRepository) UpsertBootstrap(portal *models.SitePortal) error 
 	if err != nil {
 		return fmt.Errorf("upsert bootstrap site portal: %w", err)
 	}
+	if _, err := r.db.Exec(`INSERT INTO edge_site_portals(edge_node_id,site_portal_code,is_default)
+		SELECT node.id,$1,true FROM edge_nodes node
+		WHERE node.deleted_at IS NULL
+		AND NOT EXISTS (SELECT 1 FROM edge_site_portals assignment WHERE assignment.edge_node_id=node.id)
+		ON CONFLICT DO NOTHING`, portal.Code); err != nil {
+		return fmt.Errorf("sync bootstrap Site Portal assignments: %w", err)
+	}
 	return nil
 }
 
-func (r *SitePortalRepository) SetDefaultForNode(nodeID, portalCode string) error {
-	result, err := r.db.Exec(`UPDATE edge_nodes SET default_site_portal_code=$2,updated_at=CURRENT_TIMESTAMP
-		WHERE id=$1 AND deleted_at IS NULL`, nodeID, portalCode)
-	if err != nil {
-		return fmt.Errorf("set default site portal: %w", err)
-	}
-	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
-		return fmt.Errorf("edge node not found")
+func lockEdgeNode(tx *Tx, nodeID string) error {
+	var id string
+	if err := tx.QueryRow(`SELECT id FROM edge_nodes WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, nodeID).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrEdgeNodeNotFound
+		}
+		return fmt.Errorf("lock edge node: %w", err)
 	}
 	return nil
+}
+
+func (r *SitePortalRepository) GetEdgeSitePortalConfig(nodeID string) (*models.EdgeSitePortalConfig, error) {
+	config := &models.EdgeSitePortalConfig{EdgeNodeID: nodeID, Portals: []*models.SitePortal{}}
+	var edgeNodeID string
+	if err := r.db.QueryRow(`SELECT id FROM edge_nodes WHERE id=$1 AND deleted_at IS NULL`, nodeID).Scan(&edgeNodeID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrEdgeNodeNotFound
+		}
+		return nil, fmt.Errorf("get edge node: %w", err)
+	}
+	rows, err := r.db.Query(`SELECT p.code,p.display_name,p.entry_url,p.claim_base_url,p.enabled,p.created_at,p.updated_at,assignment.is_default
+		FROM edge_site_portals assignment
+		JOIN site_portals p ON p.code=assignment.site_portal_code
+		WHERE assignment.edge_node_id=$1
+		ORDER BY p.display_name,p.code`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("list edge Site Portal assignments: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		portal := &models.SitePortal{}
+		var isDefault bool
+		if err := rows.Scan(&portal.Code, &portal.DisplayName, &portal.EntryURL, &portal.ClaimBaseURL,
+			&portal.Enabled, &portal.CreatedAt, &portal.UpdatedAt, &isDefault); err != nil {
+			return nil, fmt.Errorf("scan edge Site Portal assignment: %w", err)
+		}
+		if isDefault {
+			config.DefaultPortalCode = portal.Code
+		}
+		config.Portals = append(config.Portals, portal)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list edge Site Portal assignment rows: %w", err)
+	}
+	return config, nil
+}
+
+func scanSitePortalFields(scanner interface{ Scan(...any) error }, portal *models.SitePortal) error {
+	return scanner.Scan(
+		&portal.Code,
+		&portal.DisplayName,
+		&portal.EntryURL,
+		&portal.ClaimBaseURL,
+		&portal.Enabled,
+		&portal.CreatedAt,
+		&portal.UpdatedAt,
+	)
+}
+
+func normalizePortalCodes(codes []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(codes))
+	result := make([]string, 0, len(codes))
+	for _, raw := range codes {
+		code := strings.TrimSpace(raw)
+		if code == "" {
+			return nil, fmt.Errorf("Site Portal code cannot be empty")
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		result = append(result, code)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("at least one Site Portal is required")
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func (r *SitePortalRepository) ReplaceEdgeSitePortals(nodeID string, portalCodes []string, defaultPortalCode string) error {
+	codes, err := normalizePortalCodes(portalCodes)
+	if err != nil {
+		return err
+	}
+	defaultPortalCode = strings.TrimSpace(defaultPortalCode)
+	if defaultPortalCode == "" {
+		return fmt.Errorf("default Site Portal is required")
+	}
+	if !containsCode(codes, defaultPortalCode) {
+		return ErrDefaultPortalNotAssigned
+	}
+
+	tx, err := r.db.BeginTx()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := lockEdgeNode(tx, nodeID); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT code,enabled FROM site_portals WHERE code=ANY($1) FOR SHARE`, pq.Array(codes))
+	if err != nil {
+		return fmt.Errorf("check Site Portal assignments: %w", err)
+	}
+	found := make(map[string]bool, len(codes))
+	enabledStates := make(map[string]bool, len(codes))
+	for rows.Next() {
+		var code string
+		var enabled bool
+		if err := rows.Scan(&code, &enabled); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan Site Portal assignment: %w", err)
+		}
+		found[code] = true
+		enabledStates[code] = enabled
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("check Site Portal assignment rows: %w", err)
+	}
+	_ = rows.Close()
+	for _, code := range codes {
+		if _, ok := found[code]; !ok {
+			return ErrSitePortalNotFound
+		}
+	}
+	for _, code := range codes {
+		if !enabledStates[code] {
+			return ErrSitePortalDisabled
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM edge_site_portals WHERE edge_node_id=$1`, nodeID); err != nil {
+		return fmt.Errorf("remove edge Site Portal assignments: %w", err)
+	}
+	for _, code := range codes {
+		if _, err := tx.Exec(`INSERT INTO edge_site_portals(edge_node_id,site_portal_code,is_default) VALUES($1,$2,$3)`, nodeID, code, code == defaultPortalCode); err != nil {
+			return fmt.Errorf("assign Site Portal: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func containsCode(codes []string, target string) bool {
+	for _, code := range codes {
+		if code == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *SitePortalRepository) IsAssignedToNode(nodeID, portalCode string) (bool, error) {
+	var assigned bool
+	if err := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM edge_site_portals WHERE edge_node_id=$1 AND site_portal_code=$2)`, nodeID, portalCode).Scan(&assigned); err != nil {
+		return false, fmt.Errorf("check Site Portal assignment: %w", err)
+	}
+	return assigned, nil
 }

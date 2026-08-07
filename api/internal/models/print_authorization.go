@@ -13,6 +13,8 @@ type PrintAuthorizationInput struct {
 	PageCount         int
 	Copies            int
 	PaperSize         string
+	Orientation       string
+	ScalePercent      int
 	ColorMode         string
 	DuplexMode        string
 	PrinterID         string

@@ -13,14 +13,14 @@ func printJobRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "name", "status", "printer_id", "user_id", "user_name", "user_email",
 		"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
-		"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
+		"paper_size", "orientation", "scale_percent", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 		"error_code", "retry_count", "max_retries", "created_at", "updated_at", "printer_name",
 		"node_name", "edge_node_id", "initiator_name",
 		"site_portal_code", "quota_reserved", "quota_consumed",
 		"impressions_completed", "sheets_completed",
 	}).AddRow(
 		"job-1", "document.pdf", "completed", "printer-1", "user-1", "Alice", "alice@example.com",
-		"/data/document.pdf", "", "hash", int64(100), 2, 1, "A4", "color", "single",
+		"/data/document.pdf", "", "hash", int64(100), 2, 1, "A4", "portrait", 100, "color", "single",
 		nil, now, "", nil, 0, 3, now, now, "Printer 1", "Node 1", "node-1", "Official Site Portal", "official",
 		8, 8, 6, 4,
 	)
@@ -67,11 +67,11 @@ func TestPrintJobRepositoryGetByIDQualifiesJoinedTimestamps(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "status", "printer_id", "user_id", "user_name", "user_email",
 			"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
-			"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
+			"paper_size", "orientation", "scale_percent", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 			"retry_count", "max_retries", "created_at", "updated_at",
 		}).AddRow(
 			"job-1", "document.pdf", "processing", "printer-1", nil, "", "",
-			"/data/document.pdf", "", "hash", int64(100), 1, 1, "A4", "color", "single",
+			"/data/document.pdf", "", "hash", int64(100), 1, 1, "A4", "portrait", 100, "color", "single",
 			nil, nil, "", 0, 3, time.Now(), time.Now(),
 		))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT error_code FROM print_jobs WHERE id=$1")).
@@ -103,11 +103,11 @@ func TestPrintJobRepositoryGetByIDTreatsNullFileSizeAsZero(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "status", "printer_id", "user_id", "user_name", "user_email",
 			"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
-			"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
+			"paper_size", "orientation", "scale_percent", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 			"retry_count", "max_retries", "created_at", "updated_at",
 		}).AddRow(
 			"job-1", "local.pdf", "processing", "printer-1", nil, "", "",
-			"", "", "", int64(0), 1, 1, "A4", "color", "single",
+			"", "", "", int64(0), 1, 1, "A4", "portrait", 100, "color", "single",
 			nil, nil, "", 0, 3, time.Now(), time.Now(),
 		))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT error_code FROM print_jobs WHERE id=$1")).
@@ -139,11 +139,11 @@ func TestPrintJobRepositoryGetPendingOrDispatchedTreatsNullFileSizeAsZero(t *tes
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "status", "printer_id", "printer_name", "user_id", "user_name",
 			"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
-			"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
+			"paper_size", "orientation", "scale_percent", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 			"retry_count", "max_retries", "created_at", "updated_at",
 		}).AddRow(
 			"job-1", "local.pdf", "dispatched", "printer-1", "Printer 1", nil, "",
-			"", "", "", int64(0), 1, 1, "A4", "color", "single",
+			"", "", "", int64(0), 1, 1, "A4", "portrait", 100, "color", "single",
 			nil, nil, "", 0, 3, time.Now(), time.Now(),
 		))
 
@@ -172,11 +172,11 @@ func TestPrintJobRepositoryGetPendingJobsForRetryTreatsNullFileSizeAsZero(t *tes
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "name", "status", "printer_id", "printer_name", "edge_node_id", "user_id", "user_name",
 			"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
-			"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
+			"paper_size", "orientation", "scale_percent", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 			"retry_count", "max_retries", "created_at", "updated_at",
 		}).AddRow(
 			"job-1", "local.pdf", "pending", "printer-1", "Printer 1", "node-1", nil, "",
-			"", "", "", int64(0), 1, 1, "A4", "color", "single",
+			"", "", "", int64(0), 1, 1, "A4", "portrait", 100, "color", "single",
 			nil, nil, "", 0, 3, time.Now(), time.Now(),
 		))
 
@@ -251,14 +251,14 @@ func TestPrintJobRepositoryListKeepsSnapshotNameWithoutMatchedUser(t *testing.T)
 	rows = sqlmock.NewRows([]string{
 		"id", "name", "status", "printer_id", "user_id", "user_name", "user_email",
 		"file_path", "file_url", "content_hash", "file_size", "page_count", "copies",
-		"paper_size", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
+		"paper_size", "orientation", "scale_percent", "color_mode", "duplex_mode", "start_time", "end_time", "error_message",
 		"error_code", "retry_count", "max_retries", "created_at", "updated_at", "printer_name",
 		"node_name", "edge_node_id", "initiator_name",
 		"site_portal_code", "quota_reserved", "quota_consumed",
 		"impressions_completed", "sheets_completed",
 	}).AddRow(
 		"job-2", "legacy.pdf", "completed", "printer-1", "external-user", "Legacy User", "",
-		"/data/legacy.pdf", "", "hash", int64(100), 1, 1, "A4", "grayscale", "single",
+		"/data/legacy.pdf", "", "hash", int64(100), 1, 1, "A4", "portrait", 100, "grayscale", "single",
 		nil, time.Now(), "", nil, 0, 3, time.Now(), time.Now(), "Printer 1", "Node 1", "node-1", "主系统", "",
 		0, nil, nil, nil,
 	)

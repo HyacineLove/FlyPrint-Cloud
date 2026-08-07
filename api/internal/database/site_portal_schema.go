@@ -3,7 +3,7 @@ package database
 import "fmt"
 
 // initSitePortalSchema keeps direct InitTables callers compatible with the
-// forward migration used by normal server startup.
+// forward migrations while ensuring the current tables are present.
 func (db *DB) initSitePortalSchema() error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS site_portals (
@@ -15,9 +15,17 @@ func (db *DB) initSitePortalSchema() error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
-		`ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS default_site_portal_code VARCHAR(64)`,
-		`ALTER TABLE edge_nodes ALTER COLUMN default_site_portal_code SET DEFAULT 'official'`,
-		`UPDATE edge_nodes SET default_site_portal_code='official' WHERE default_site_portal_code IS NULL`,
+		`CREATE TABLE IF NOT EXISTS edge_site_portals (
+			edge_node_id VARCHAR(100) NOT NULL REFERENCES edge_nodes(id) ON DELETE CASCADE,
+			site_portal_code VARCHAR(64) NOT NULL REFERENCES site_portals(code),
+			is_default BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (edge_node_id, site_portal_code)
+		)`,
+		`ALTER TABLE edge_site_portals ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT false`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_edge_site_portals_default
+			ON edge_site_portals(edge_node_id) WHERE is_default=true`,
+		`CREATE INDEX IF NOT EXISTS idx_edge_site_portals_portal ON edge_site_portals(site_portal_code)`,
 		`CREATE TABLE IF NOT EXISTS external_identities (
 			site_portal_code VARCHAR(64) NOT NULL REFERENCES site_portals(code),
 			external_user_id VARCHAR(255) NOT NULL,

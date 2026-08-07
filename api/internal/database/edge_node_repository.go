@@ -44,23 +44,8 @@ func (r *EdgeNodeRepository) UpdateEnabled(id string, enabled bool) error {
 	return nil
 }
 
-// UpdateLoginSource changes only the Cloud-owned terminal entry configuration.
-func (r *EdgeNodeRepository) UpdateLoginSource(id, source string) error {
-	result, err := r.db.Exec(`UPDATE edge_nodes SET login_source=$2 WHERE id=$1 AND deleted_at IS NULL`, id, source)
-	if err != nil {
-		return fmt.Errorf("update edge node login source: %w", err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return fmt.Errorf("edge node not found")
-	}
-	return nil
-}
-
 // CreateEdgeNode 创建 Edge Node
 func (r *EdgeNodeRepository) CreateEdgeNode(node *models.EdgeNode) error {
-	if node.LoginSource == "" {
-		node.LoginSource = "official"
-	}
 	query := `
 		INSERT INTO edge_nodes (
 			id, name, status, enabled, version, last_heartbeat,
@@ -145,7 +130,7 @@ func (r *EdgeNodeRepository) UpsertEdgeNode(node *models.EdgeNode) error {
 func (r *EdgeNodeRepository) GetEdgeNodeByID(id string) (*models.EdgeNode, error) {
 	node := &models.EdgeNode{}
 	query := `
-		SELECT id, name, COALESCE(alias,''), COALESCE(login_source,'official'), registration_state, status, enabled, version, last_heartbeat,
+		SELECT id, name, COALESCE(alias,''), registration_state, status, enabled, version, last_heartbeat,
 			   location, latitude, longitude,
 			   ip_address, mac_address, network_interface,
 			   os_version, cpu_info, memory_info, disk_info,
@@ -160,11 +145,10 @@ func (r *EdgeNodeRepository) GetEdgeNodeByID(id string) (*models.EdgeNode, error
 	var connectionQuality sql.NullString
 	var latency sql.NullInt32
 	var version sql.NullString
-	var loginSource sql.NullString
 	var deletedAt sql.NullTime
 
 	err := r.db.QueryRow(query, id).Scan(
-		&node.ID, &node.Name, &node.Alias, &loginSource, &node.RegistrationState, &node.ConnectionStatus, &node.Enabled, &version, &lastHeartbeat,
+		&node.ID, &node.Name, &node.Alias, &node.RegistrationState, &node.ConnectionStatus, &node.Enabled, &version, &lastHeartbeat,
 		&location, &latitude, &longitude,
 		&ipAddress, &macAddress, &networkInterface,
 		&osVersion, &cpuInfo, &memoryInfo, &diskInfo,
@@ -182,9 +166,6 @@ func (r *EdgeNodeRepository) GetEdgeNodeByID(id string) (*models.EdgeNode, error
 	// 处理可为空的字段
 	if version.Valid {
 		node.Version = version.String
-	}
-	if loginSource.Valid {
-		node.LoginSource = loginSource.String
 	}
 	if lastHeartbeat.Valid {
 		node.LastHeartbeat = lastHeartbeat.Time
@@ -360,7 +341,7 @@ func (r *EdgeNodeRepository) ListEdgeNodes(offset, limit int, status, sortBy, so
 
 	// 查询数据
 	query := fmt.Sprintf(`
-		SELECT id, name, COALESCE(alias,''), COALESCE(login_source,'official'), registration_state, status, enabled, version, last_heartbeat,
+		SELECT id, name, COALESCE(alias,''), registration_state, status, enabled, version, last_heartbeat,
 			   location, latitude, longitude,
 			   ip_address, mac_address, network_interface,
 			   os_version, cpu_info, memory_info, disk_info,
@@ -387,11 +368,10 @@ func (r *EdgeNodeRepository) ListEdgeNodes(offset, limit int, status, sortBy, so
 		var connectionQuality sql.NullString
 		var latency sql.NullInt32
 		var version sql.NullString
-		var loginSource sql.NullString
 
 		var deletedAt sql.NullTime
 		err := rows.Scan(
-			&node.ID, &node.Name, &node.Alias, &loginSource, &node.RegistrationState, &node.ConnectionStatus, &node.Enabled, &version, &lastHeartbeat,
+			&node.ID, &node.Name, &node.Alias, &node.RegistrationState, &node.ConnectionStatus, &node.Enabled, &version, &lastHeartbeat,
 			&location, &latitude, &longitude,
 			&ipAddress, &macAddress, &networkInterface,
 			&osVersion, &cpuInfo, &memoryInfo, &diskInfo,
@@ -405,9 +385,6 @@ func (r *EdgeNodeRepository) ListEdgeNodes(offset, limit int, status, sortBy, so
 		// 处理可为空的字段
 		if version.Valid {
 			node.Version = version.String
-		}
-		if loginSource.Valid {
-			node.LoginSource = loginSource.String
 		}
 		if lastHeartbeat.Valid {
 			node.LastHeartbeat = lastHeartbeat.Time

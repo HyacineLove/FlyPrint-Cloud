@@ -17,41 +17,39 @@ import (
 
 // EdgeNodeHandler Edge Node 管理处理器
 type EdgeNodeHandler struct {
-	db                  *database.DB
-	edgeNodeRepo        *database.EdgeNodeRepository
-	printerRepo         *database.PrinterRepository
-	printJobRepo        *database.PrintJobRepository
-	opsContactRepo      *database.OpsContactRepository
-	wsManager           *websocket.ConnectionManager
-	tokenUsageRepo      *database.TokenUsageRepository
-	alertRepo           *database.OperationalAlertRepository
-	tickets             *database.TerminalTicketRepository
-	uploadSessions      *database.TerminalUploadSessionRepository
-	sitePortalRepo      *database.SitePortalRepository
-	statusService       *operations.StatusService
+	db             *database.DB
+	edgeNodeRepo   *database.EdgeNodeRepository
+	printerRepo    *database.PrinterRepository
+	printJobRepo   *database.PrintJobRepository
+	opsContactRepo *database.OpsContactRepository
+	wsManager      *websocket.ConnectionManager
+	tokenUsageRepo *database.TokenUsageRepository
+	alertRepo      *database.OperationalAlertRepository
+	tickets        *database.TerminalTicketRepository
+	uploadSessions *database.TerminalUploadSessionRepository
+	statusService  *operations.StatusService
 }
 
 // NewEdgeNodeHandler 创建 Edge Node 管理处理器
-func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, sitePortalRepo *database.SitePortalRepository, opsContactRepo *database.OpsContactRepository) *EdgeNodeHandler {
-	return NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, tickets, uploadSessions, sitePortalRepo, opsContactRepo, nil)
+func NewEdgeNodeHandler(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, opsContactRepo *database.OpsContactRepository) *EdgeNodeHandler {
+	return NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, tickets, uploadSessions, opsContactRepo, nil)
 }
 
 // NewEdgeNodeHandlerWithServices wires the lifecycle settlement dependencies
 // used when disabling or deleting an Edge node.
-func NewEdgeNodeHandlerWithServices(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, sitePortalRepo *database.SitePortalRepository, opsContactRepo *database.OpsContactRepository, statusService *operations.StatusService) *EdgeNodeHandler {
+func NewEdgeNodeHandlerWithServices(db *database.DB, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, printJobRepo *database.PrintJobRepository, wsManager *websocket.ConnectionManager, tokenUsageRepo *database.TokenUsageRepository, alertRepo *database.OperationalAlertRepository, tickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository, opsContactRepo *database.OpsContactRepository, statusService *operations.StatusService) *EdgeNodeHandler {
 	h := &EdgeNodeHandler{
-		db:                  db,
-		edgeNodeRepo:        edgeNodeRepo,
-		printerRepo:         printerRepo,
-		printJobRepo:        printJobRepo,
-		opsContactRepo:      opsContactRepo,
-		wsManager:           wsManager,
-		tokenUsageRepo:      tokenUsageRepo,
-		alertRepo:           alertRepo,
-		tickets:             tickets,
-		uploadSessions:      uploadSessions,
-		sitePortalRepo:      sitePortalRepo,
-		statusService:       statusService,
+		db:             db,
+		edgeNodeRepo:   edgeNodeRepo,
+		printerRepo:    printerRepo,
+		printJobRepo:   printJobRepo,
+		opsContactRepo: opsContactRepo,
+		wsManager:      wsManager,
+		tokenUsageRepo: tokenUsageRepo,
+		alertRepo:      alertRepo,
+		tickets:        tickets,
+		uploadSessions: uploadSessions,
+		statusService:  statusService,
 	}
 	return h
 }
@@ -113,10 +111,6 @@ type UpdateEdgeNodeEnabledRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
-type UpdateEdgeNodeLoginSourceRequest struct {
-	LoginSource string `json:"login_source" binding:"required"`
-}
-
 // EdgeNodeInfo Edge Node 信息响应
 // ProvisionEdgeNodeRequest creates the server-side identity before an Edge is
 // installed. The administrator then creates one OAuth client bound to the
@@ -130,7 +124,6 @@ type EdgeNodeInfo struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Alias             string    `json:"alias,omitempty"`
-	LoginSource       string    `json:"login_source"`
 	RegistrationState string    `json:"registration_state"`
 	ConnectionStatus  string    `json:"connection_status"`
 	HealthStatus      string    `json:"health_status"`
@@ -233,7 +226,6 @@ func (h *EdgeNodeHandler) RegisterEdgeNode(c *gin.Context) {
 		ID:                node.ID,
 		Name:              node.Name,
 		Alias:             node.Alias,
-		LoginSource:       node.LoginSource,
 		RegistrationState: node.RegistrationState,
 		ConnectionStatus:  node.ConnectionStatus,
 		HealthStatus:      node.HealthStatus,
@@ -336,7 +328,6 @@ func (h *EdgeNodeHandler) ListEdgeNodes(c *gin.Context) {
 			ID:                node.ID,
 			Name:              node.Name,
 			Alias:             node.Alias,
-			LoginSource:       node.LoginSource,
 			RegistrationState: node.RegistrationState,
 			ConnectionStatus:  node.ConnectionStatus,
 			HealthStatus:      node.HealthStatus,
@@ -404,7 +395,6 @@ func (h *EdgeNodeHandler) GetEdgeNode(c *gin.Context) {
 		ID:                node.ID,
 		Name:              node.Name,
 		Alias:             node.Alias,
-		LoginSource:       node.LoginSource,
 		RegistrationState: node.RegistrationState,
 		ConnectionStatus:  node.ConnectionStatus,
 		HealthStatus:      node.HealthStatus,
@@ -503,7 +493,6 @@ func (h *EdgeNodeHandler) UpdateEdgeNode(c *gin.Context) {
 		ID:                node.ID,
 		Name:              node.Name,
 		Alias:             node.Alias,
-		LoginSource:       node.LoginSource,
 		RegistrationState: node.RegistrationState,
 		ConnectionStatus:  node.ConnectionStatus,
 		HealthStatus:      node.HealthStatus,
@@ -587,30 +576,6 @@ func (h *EdgeNodeHandler) UpdateEnabled(c *gin.Context) {
 		_ = h.uploadSessions.DeleteForNode(c.Param("id"))
 	}
 	SuccessResponse(c, gin.H{"id": c.Param("id"), "enabled": req.Enabled})
-}
-
-func (h *EdgeNodeHandler) UpdateLoginSource(c *gin.Context) {
-	var req UpdateEdgeNodeLoginSourceRequest
-	if err := c.ShouldBindJSON(&req); err != nil || !isValidTerminalLoginSource(req.LoginSource) {
-		BadRequestResponse(c, "invalid terminal login source")
-		return
-	}
-	if req.LoginSource != "official" {
-		if h.sitePortalRepo == nil {
-			InternalErrorResponse(c, "site portal repository unavailable")
-			return
-		}
-		portal, err := h.sitePortalRepo.GetByCode(req.LoginSource)
-		if err != nil || portal == nil || !portal.Enabled {
-			BadRequestResponse(c, "terminal login Site Portal is not enabled")
-			return
-		}
-	}
-	if err := h.edgeNodeRepo.UpdateLoginSource(c.Param("id"), req.LoginSource); err != nil {
-		NotFoundResponse(c, "Edge Node not found")
-		return
-	}
-	SuccessResponse(c, gin.H{"id": c.Param("id"), "login_source": req.LoginSource})
 }
 
 // DeleteEdgeNode 删除 Edge Node

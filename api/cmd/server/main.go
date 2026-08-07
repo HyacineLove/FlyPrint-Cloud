@@ -230,7 +230,7 @@ func main() {
 
 	// 初始化处理器
 	userHandler := handlers.NewUserHandler(userRepo, printQuotaRepo)
-	edgeNodeHandler := handlers.NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, sitePortalRepo, opsContactRepo, statusService)
+	edgeNodeHandler := handlers.NewEdgeNodeHandlerWithServices(db, edgeNodeRepo, printerRepo, printJobRepo, wsManager, tokenUsageRepo, alertRepo, terminalTicketRepo, terminalUploadSessions, opsContactRepo, statusService)
 	printerHandler := handlers.NewPrinterHandler(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo)
 	printJobHandler := handlers.NewPrintJobHandler(printJobRepo, printerRepo, edgeNodeRepo, wsManager, statusService, alertRepo)
 	portalPrintHandler := handlers.NewPortalPrintHandler(printAuthorizationRepo)
@@ -443,7 +443,10 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 				edgeNodeGroup.GET("/:id", edgeNodeHandler.GetEdgeNode)
 				edgeNodeGroup.PATCH("/:id/alias", edgeNodeHandler.UpdateAlias)
 				edgeNodeGroup.PATCH("/:id/enabled", edgeNodeHandler.UpdateEnabled)
-				edgeNodeGroup.PATCH("/:id/login-source", middleware.OAuth2ResourceServer("fly-print-admin"), edgeNodeHandler.UpdateLoginSource)
+				if sitePortalAdminHandler != nil {
+					edgeNodeGroup.GET("/:id/site-portals", middleware.OAuth2ResourceServer("fly-print-admin"), sitePortalAdminHandler.GetEdgeSitePortals)
+					edgeNodeGroup.PUT("/:id/site-portals", middleware.OAuth2ResourceServer("fly-print-admin"), sitePortalAdminHandler.UpdateEdgeSitePortals)
+				}
 				edgeNodeGroup.DELETE("/:id", edgeNodeHandler.DeleteEdgeNode)
 			}
 

@@ -23,25 +23,6 @@ func TestOfficialRegistrationRoleIsFixedToViewer(t *testing.T) {
 	}
 }
 
-func TestTerminalLoginSourceValidation(t *testing.T) {
-	tests := []struct {
-		source string
-		valid  bool
-	}{
-		{source: "official", valid: true},
-		{source: "official-site", valid: true},
-		{source: "", valid: false},
-		{source: "not a portal", valid: false},
-		{source: "../portal", valid: false},
-	}
-
-	for _, tt := range tests {
-		if got := isValidTerminalLoginSource(tt.source); got != tt.valid {
-			t.Errorf("isValidTerminalLoginSource(%q) = %v, want %v", tt.source, got, tt.valid)
-		}
-	}
-}
-
 func TestOfficialRegistrationCreatesViewerAndReturnsToken(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {

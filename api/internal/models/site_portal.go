@@ -13,6 +13,15 @@ type SitePortal struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 	OAuthClientID      string    `json:"oauth_client_id,omitempty"`
 	OAuthClientEnabled bool      `json:"oauth_client_enabled,omitempty"`
+	EdgeNodeCount      int       `json:"edge_node_count"`
+}
+
+// EdgeSitePortalConfig is the Cloud-owned entry configuration for one Edge
+// node. The default portal must always be one of Portals.
+type EdgeSitePortalConfig struct {
+	EdgeNodeID        string        `json:"edge_node_id"`
+	Portals           []*SitePortal `json:"portals"`
+	DefaultPortalCode string        `json:"default_code"`
 }
 
 // ExternalIdentity maps a stable identity from one Site Portal to a Cloud user.

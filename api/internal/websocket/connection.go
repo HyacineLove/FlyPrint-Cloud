@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,50 @@ import (
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
+
+const (
+	minScalePercent  = 50
+	maxScalePercent  = 150
+	scaleStepPercent = 10
+)
+
+func normalizeInteractiveOrientation(value interface{}) (string, error) {
+	if value == nil || strings.TrimSpace(fmt.Sprint(value)) == "" {
+		return "portrait", nil
+	}
+	orientation := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	if orientation != "portrait" && orientation != "landscape" {
+		return "", fmt.Errorf("unsupported orientation")
+	}
+	return orientation, nil
+}
+
+func normalizeInteractiveScalePercent(value interface{}) (int, error) {
+	if value == nil {
+		return 100, nil
+	}
+	var percent float64
+	switch v := value.(type) {
+	case float64:
+		percent = v
+	case float32:
+		percent = float64(v)
+	case int:
+		percent = float64(v)
+	case int64:
+		percent = float64(v)
+	default:
+		return 0, fmt.Errorf("invalid scale_percent")
+	}
+	if math.IsNaN(percent) || math.IsInf(percent, 0) || percent != math.Trunc(percent) {
+		return 0, fmt.Errorf("scale_percent must be an integer")
+	}
+	valueInt := int(percent)
+	if valueInt < minScalePercent || valueInt > maxScalePercent || valueInt%scaleStepPercent != 0 {
+		return 0, fmt.Errorf("scale_percent must be between 50 and 150 in 10 percent steps")
+	}
+	return valueInt, nil
+}
 
 const (
 	// 写入等待时间
@@ -38,22 +83,22 @@ const (
 
 // Connection 表示单个 WebSocket 连接
 type Connection struct {
-	NodeID              string
-	Conn                *websocket.Conn
-	Send                chan []byte
-	done                chan struct{}
-	closeOnce           sync.Once
-	Manager             *ConnectionManager
-	PrinterRepo         *database.PrinterRepository
-	EdgeNodeRepo        *database.EdgeNodeRepository
-	PrintJobRepo        *database.PrintJobRepository
-	FileRepo            *database.FileRepository
-	TokenManager        *security.TokenManager
-	StatusService       *operations.StatusService
-	Receipts            *database.EdgeJobUpdateReceiptRepository
-	TerminalSessions    *database.TerminalSessionRepository
-	TerminalTickets     *database.TerminalTicketRepository
-	UploadSessions      *database.TerminalUploadSessionRepository
+	NodeID           string
+	Conn             *websocket.Conn
+	Send             chan []byte
+	done             chan struct{}
+	closeOnce        sync.Once
+	Manager          *ConnectionManager
+	PrinterRepo      *database.PrinterRepository
+	EdgeNodeRepo     *database.EdgeNodeRepository
+	PrintJobRepo     *database.PrintJobRepository
+	FileRepo         *database.FileRepository
+	TokenManager     *security.TokenManager
+	StatusService    *operations.StatusService
+	Receipts         *database.EdgeJobUpdateReceiptRepository
+	TerminalSessions *database.TerminalSessionRepository
+	TerminalTickets  *database.TerminalTicketRepository
+	UploadSessions   *database.TerminalUploadSessionRepository
 
 	// ACK 机制相关
 	pendingAcks map[string]chan string
@@ -63,22 +108,22 @@ type Connection struct {
 // NewConnection 创建新连接
 func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository) *Connection {
 	return &Connection{
-		NodeID:              nodeID,
-		Conn:                conn,
-		Send:                make(chan []byte, 256),
-		done:                make(chan struct{}),
-		Manager:             manager,
-		PrinterRepo:         printerRepo,
-		EdgeNodeRepo:        edgeNodeRepo,
-		PrintJobRepo:        printJobRepo,
-		FileRepo:            fileRepo,
-		TokenManager:        tokenManager,
-		StatusService:       statusService,
-		Receipts:            receipts,
-		TerminalSessions:    terminalSessions,
-		TerminalTickets:     terminalTickets,
-		UploadSessions:      uploadSessions,
-		pendingAcks:         make(map[string]chan string),
+		NodeID:           nodeID,
+		Conn:             conn,
+		Send:             make(chan []byte, 256),
+		done:             make(chan struct{}),
+		Manager:          manager,
+		PrinterRepo:      printerRepo,
+		EdgeNodeRepo:     edgeNodeRepo,
+		PrintJobRepo:     printJobRepo,
+		FileRepo:         fileRepo,
+		TokenManager:     tokenManager,
+		StatusService:    statusService,
+		Receipts:         receipts,
+		TerminalSessions: terminalSessions,
+		TerminalTickets:  terminalTickets,
+		UploadSessions:   uploadSessions,
+		pendingAcks:      make(map[string]chan string),
 	}
 }
 
@@ -436,6 +481,16 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 		logger.Warn("Missing required fields in submit print params from node", zap.String("node_id", c.NodeID))
 		return
 	}
+	orientation, orientationErr := normalizeInteractiveOrientation(payload.Options["orientation"])
+	if orientationErr != nil {
+		c.sendError("invalid_print_options", orientationErr.Error(), payload.PrinterID)
+		return
+	}
+	scalePercent, scaleErr := normalizeInteractiveScalePercent(payload.Options["scale_percent"])
+	if scaleErr != nil {
+		c.sendError("invalid_print_options", scaleErr.Error(), payload.PrinterID)
+		return
+	}
 
 	// 获取文件信息
 	file, err := c.FileRepo.GetByID(payload.FileID)
@@ -506,17 +561,20 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 
 	// 创建打印任务
 	job := &models.PrintJob{
-		Name:        file.OriginalName,
-		Status:      "pending",
-		PrinterID:   payload.PrinterID,
-		UserID:      file.UploaderID,
-		UserName:    getUserDisplayName(file.UploaderID), // 从用户ID获取显示名称
-		FilePath:    file.FilePath,
-		FileURL:     file.URL,
-		ContentHash: file.ContentHash,
-		FileSize:    file.Size,
-		Copies:      1,
-		MaxRetries:  3,
+		Name:         file.OriginalName,
+		Status:       "pending",
+		PrinterID:    payload.PrinterID,
+		UserID:       file.UploaderID,
+		UserName:     getUserDisplayName(file.UploaderID), // 从用户ID获取显示名称
+		FilePath:     file.FilePath,
+		FileURL:      file.URL,
+		ContentHash:  file.ContentHash,
+		FileSize:     file.Size,
+		Copies:       1,
+		PaperSize:    "A4",
+		Orientation:  orientation,
+		ScalePercent: scalePercent,
+		MaxRetries:   3,
 	}
 
 	// 设置 Options
@@ -530,6 +588,8 @@ func (c *Connection) handleSubmitPrintParams(msg *Message) {
 			job.PaperSize = v
 		}
 	}
+	job.Orientation = orientation
+	job.ScalePercent = scalePercent
 	if val, ok := payload.Options["color_mode"]; ok {
 		if v, ok := val.(string); ok {
 			job.ColorMode = v

@@ -24,16 +24,22 @@ func NewPrintJobRepository(db *DB) *PrintJobRepository {
 
 // CreatePrintJob 创建打印任务
 func (r *PrintJobRepository) CreatePrintJob(job *models.PrintJob) error {
+	if job.Orientation == "" {
+		job.Orientation = "portrait"
+	}
+	if job.ScalePercent == 0 {
+		job.ScalePercent = 100
+	}
 	query := `
 		INSERT INTO print_jobs (
 			id, name, status, printer_id, 
 			user_id, user_name, file_path, file_url, content_hash, file_size, page_count, 
-			copies, paper_size, color_mode, duplex_mode, 
+			copies, paper_size, orientation, scale_percent, color_mode, duplex_mode,
 			start_time, end_time, error_message, retry_count, 
 			max_retries, created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 
-			$12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+			$12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
 		)`
 
 	now := time.Now()
@@ -50,7 +56,7 @@ func (r *PrintJobRepository) CreatePrintJob(job *models.PrintJob) error {
 	_, err := r.db.DB.Exec(query,
 		job.ID, job.Name, job.Status, job.PrinterID,
 		userID, job.UserName, job.FilePath, job.FileURL, job.ContentHash, job.FileSize, job.PageCount,
-		job.Copies, job.PaperSize, job.ColorMode, job.DuplexMode,
+		job.Copies, job.PaperSize, job.Orientation, job.ScalePercent, job.ColorMode, job.DuplexMode,
 		job.StartTime, job.EndTime, job.ErrorMessage, job.RetryCount,
 		job.MaxRetries, job.CreatedAt, job.UpdatedAt,
 	)
@@ -64,7 +70,7 @@ func (r *PrintJobRepository) GetPrintJobByID(id string) (*models.PrintJob, error
 		SELECT pj.id, pj.name, pj.status, pj.printer_id,
 			   pj.user_id, COALESCE(NULLIF(u.username, ''), pj.user_name, ''), COALESCE(u.email, ''),
 			   pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
-			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode,
+			   pj.copies, pj.paper_size, pj.orientation, pj.scale_percent, pj.color_mode, pj.duplex_mode,
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at
 		FROM print_jobs pj LEFT JOIN users u ON u.id::text = pj.user_id WHERE pj.id = $1`
@@ -74,7 +80,7 @@ func (r *PrintJobRepository) GetPrintJobByID(id string) (*models.PrintJob, error
 	err := r.db.DB.QueryRow(query, id).Scan(
 		&job.ID, &job.Name, &job.Status, &job.PrinterID,
 		&userID, &job.UserName, &job.UserEmail, &job.FilePath, &job.FileURL, &job.ContentHash, &job.FileSize, &job.PageCount,
-		&job.Copies, &job.PaperSize, &job.ColorMode, &job.DuplexMode,
+		&job.Copies, &job.PaperSize, &job.Orientation, &job.ScalePercent, &job.ColorMode, &job.DuplexMode,
 		&job.StartTime, &job.EndTime, &job.ErrorMessage, &job.RetryCount,
 		&job.MaxRetries, &job.CreatedAt, &job.UpdatedAt,
 	)
@@ -112,7 +118,7 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id,
 			   pj.user_id, COALESCE(NULLIF(u.username, ''), pj.user_name, ''), COALESCE(u.email, ''), pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
-			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode, 
+			   pj.copies, pj.paper_size, pj.orientation, pj.scale_percent, pj.color_mode, pj.duplex_mode,
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.error_code, pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at,
 			   COALESCE(NULLIF(p.display_name, ''), p.name, '') as printer_name,
@@ -212,7 +218,7 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 		err := rows.Scan(
 			&job.ID, &job.Name, &job.Status, &job.PrinterID,
 			&userID, &job.UserName, &job.UserEmail, &job.FilePath, &job.FileURL, &job.ContentHash, &job.FileSize, &job.PageCount,
-			&job.Copies, &job.PaperSize, &job.ColorMode, &job.DuplexMode,
+			&job.Copies, &job.PaperSize, &job.Orientation, &job.ScalePercent, &job.ColorMode, &job.DuplexMode,
 			&job.StartTime, &job.EndTime, &job.ErrorMessage, &errorCode, &job.RetryCount,
 			&job.MaxRetries, &job.CreatedAt, &job.UpdatedAt,
 			&printerName, &nodeName, &edgeNodeID, &job.InitiatorName,
@@ -260,20 +266,26 @@ func (r *PrintJobRepository) ListPrintJobs(limit, offset int, status, printerID,
 
 // UpdatePrintJob 更新打印任务
 func (r *PrintJobRepository) UpdatePrintJob(job *models.PrintJob) error {
+	if job.Orientation == "" {
+		job.Orientation = "portrait"
+	}
+	if job.ScalePercent == 0 {
+		job.ScalePercent = 100
+	}
 	query := `
 		UPDATE print_jobs SET 
 			name = $2, status = $3, file_path = $4,
 			content_hash = $5, file_size = $6, page_count = $7, copies = $8, paper_size = $9,
-			color_mode = $10, duplex_mode = $11, start_time = $12,
-			end_time = $13, error_message = $14, retry_count = $15,
-			max_retries = $16, updated_at = $17
+			orientation = $10, scale_percent = $11, color_mode = $12, duplex_mode = $13, start_time = $14,
+			end_time = $15, error_message = $16, retry_count = $17,
+			max_retries = $18, updated_at = $19
 		WHERE id = $1`
 
 	job.UpdatedAt = time.Now()
 
 	_, err := r.db.DB.Exec(query,
 		job.ID, job.Name, job.Status, job.FilePath, job.ContentHash,
-		job.FileSize, job.PageCount, job.Copies, job.PaperSize,
+		job.FileSize, job.PageCount, job.Copies, job.PaperSize, job.Orientation, job.ScalePercent,
 		job.ColorMode, job.DuplexMode, job.StartTime,
 		job.EndTime, job.ErrorMessage, job.RetryCount,
 		job.MaxRetries, job.UpdatedAt,
@@ -312,7 +324,7 @@ func (r *PrintJobRepository) GetPendingOrDispatchedJobsByEdgeNodeID(edgeNodeID s
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id, p.name,
 			   pj.user_id, pj.user_name, pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
-			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode, 
+			   pj.copies, pj.paper_size, pj.orientation, pj.scale_percent, pj.color_mode, pj.duplex_mode,
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at
 		FROM print_jobs pj
@@ -334,7 +346,7 @@ func (r *PrintJobRepository) GetPendingOrDispatchedJobsByEdgeNodeID(edgeNodeID s
 		err := rows.Scan(
 			&job.ID, &job.Name, &job.Status, &job.PrinterID, &job.PrinterName,
 			&userID, &job.UserName, &job.FilePath, &job.FileURL, &job.ContentHash, &job.FileSize, &job.PageCount,
-			&job.Copies, &job.PaperSize, &job.ColorMode, &job.DuplexMode,
+			&job.Copies, &job.PaperSize, &job.Orientation, &job.ScalePercent, &job.ColorMode, &job.DuplexMode,
 			&job.StartTime, &job.EndTime, &job.ErrorMessage, &job.RetryCount,
 			&job.MaxRetries, &job.CreatedAt, &job.UpdatedAt,
 		)
@@ -626,7 +638,7 @@ func (r *PrintJobRepository) GetPendingJobsForRetry(minAge time.Duration) ([]*mo
 	query := `
 		SELECT pj.id, pj.name, pj.status, pj.printer_id, p.name as printer_name, p.edge_node_id,
 			   pj.user_id, pj.user_name, pj.file_path, pj.file_url, pj.content_hash, COALESCE(pj.file_size, 0), pj.page_count,
-			   pj.copies, pj.paper_size, pj.color_mode, pj.duplex_mode,
+			   pj.copies, pj.paper_size, pj.orientation, pj.scale_percent, pj.color_mode, pj.duplex_mode,
 			   pj.start_time, pj.end_time, COALESCE(pj.error_message, ''), pj.retry_count,
 			   pj.max_retries, pj.created_at, pj.updated_at
 		FROM print_jobs pj
@@ -652,7 +664,7 @@ func (r *PrintJobRepository) GetPendingJobsForRetry(minAge time.Duration) ([]*mo
 		err := rows.Scan(
 			&job.ID, &job.Name, &job.Status, &job.PrinterID, &job.PrinterName, &edgeNodeID,
 			&userID, &job.UserName, &job.FilePath, &job.FileURL, &job.ContentHash, &job.FileSize, &job.PageCount,
-			&job.Copies, &job.PaperSize, &job.ColorMode, &job.DuplexMode,
+			&job.Copies, &job.PaperSize, &job.Orientation, &job.ScalePercent, &job.ColorMode, &job.DuplexMode,
 			&job.StartTime, &job.EndTime, &job.ErrorMessage, &job.RetryCount,
 			&job.MaxRetries, &job.CreatedAt, &job.UpdatedAt,
 		)

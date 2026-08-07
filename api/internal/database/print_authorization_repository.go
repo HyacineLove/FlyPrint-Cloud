@@ -51,6 +51,8 @@ func PrintAuthorizationRequestHash(input models.PrintAuthorizationInput) string 
 		PageCount         int    `json:"page_count"`
 		Copies            int    `json:"copies"`
 		PaperSize         string `json:"paper_size"`
+		Orientation       string `json:"orientation"`
+		ScalePercent      int    `json:"scale_percent"`
 		ColorMode         string `json:"color_mode"`
 		DuplexMode        string `json:"duplex_mode"`
 		PrinterID         string `json:"printer_id"`
@@ -59,6 +61,7 @@ func PrintAuthorizationRequestHash(input models.PrintAuthorizationInput) string 
 		TerminalSessionID: input.TerminalSessionID, SitePortalCode: input.SitePortalCode,
 		LocalFileID: input.LocalFileID, FileDisplayName: input.FileDisplayName,
 		PageCount: input.PageCount, Copies: input.Copies, PaperSize: input.PaperSize,
+		Orientation: input.Orientation, ScalePercent: input.ScalePercent,
 		ColorMode: input.ColorMode, DuplexMode: input.DuplexMode, PrinterID: input.PrinterID,
 	}
 	encoded, _ := json.Marshal(payload)
@@ -78,10 +81,18 @@ func validPrintAuthorizationInput(input models.PrintAuthorizationInput) bool {
 		len(input.FileDisplayName) <= 200 &&
 		strings.TrimSpace(input.PrinterID) != "" &&
 		strings.TrimSpace(input.PaperSize) != "" &&
+		(input.Orientation == "portrait" || input.Orientation == "landscape") &&
+		input.ScalePercent >= 50 && input.ScalePercent <= 150 && input.ScalePercent%10 == 0 &&
 		!input.Now.IsZero()
 }
 
 func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorizationInput) (*models.PrintAuthorizationResult, error) {
+	if strings.TrimSpace(input.Orientation) == "" {
+		input.Orientation = "portrait"
+	}
+	if input.ScalePercent == 0 {
+		input.ScalePercent = 100
+	}
 	if !validPrintAuthorizationInput(input) {
 		return nil, ErrPrintAuthorizationInvalid
 	}
@@ -226,16 +237,17 @@ func (r *PrintAuthorizationRepository) Authorize(input models.PrintAuthorization
 	var jobID string
 	err = tx.QueryRow(`INSERT INTO print_jobs (
 		name,status,printer_id,user_id,user_name,file_path,file_url,content_hash,
-		page_count,copies,paper_size,color_mode,duplex_mode,retry_count,max_retries,
+		page_count,copies,paper_size,orientation,scale_percent,color_mode,duplex_mode,retry_count,max_retries,
 		edge_node_id,site_portal_code,terminal_session_id,confirmation_id,
 		authorization_request_hash,local_file_id,quota_reserved,created_at,updated_at
 	) VALUES (
 		$1,'pending',$2::uuid,$3,$4,'','','',
-		$5,$6,$7,$8,$9,0,0,
-		$10,$11,$12,$13,$14,$15,$16,$17,$17
+		$5,$6,$7,$8,$9,$10,$11,0,0,
+		$12,$13,$14,$15,$16,$17,$18,$19,$19
 	) RETURNING id::text`,
 		input.FileDisplayName, input.PrinterID, cloudUserID, displayName,
-		input.PageCount, input.Copies, input.PaperSize, input.ColorMode, input.DuplexMode,
+		input.PageCount, input.Copies, input.PaperSize, input.Orientation, input.ScalePercent,
+		input.ColorMode, input.DuplexMode,
 		input.NodeID, boundPortal, input.TerminalSessionID, input.ConfirmationID,
 		requestHash, input.LocalFileID, reservedQuota, input.Now,
 	).Scan(&jobID)

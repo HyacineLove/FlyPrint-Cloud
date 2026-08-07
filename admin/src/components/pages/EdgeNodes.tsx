@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Checkbox, Input, Modal, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, FileTextOutlined, PlusOutlined, PrinterOutlined, TeamOutlined } from '@ant-design/icons';
+import { DeleteOutlined, FileTextOutlined, PlusOutlined, PrinterOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { buildApiUrl, buildAuthUrl } from '../../config';
 import { DateTimeValue } from '../DisplayValue';
@@ -10,13 +10,19 @@ import { RelationStack } from '../RelationLinks';
 interface EdgeNode {
   id: string; name: string; alias?: string; location?: string; connection_status: string;
   health_status: string; health_message?: string; enabled: boolean; last_heartbeat?: string;
-  version?: string; registration_state: string; login_source?: string; ops_contact_count?: number; printer_count?: number; job_count?: number;
+  version?: string; registration_state: string; ops_contact_count?: number; printer_count?: number; job_count?: number;
 }
 
 interface SitePortal {
   code: string;
   display_name: string;
   enabled: boolean;
+}
+
+interface PortalConfig {
+  edge_node_id: string;
+  portals: SitePortal[];
+  default_code: string;
 }
 
 async function request(path: string, init?: RequestInit) {
@@ -26,8 +32,9 @@ async function request(path: string, init?: RequestInit) {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers || {}) },
   });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json())?.data;
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message || body.error || `HTTP ${response.status}`);
+  return body.data;
 }
 
 const statusTag = (status: string) => <Tag color={status === 'online' ? 'success' : status === 'unstable' ? 'warning' : 'default'}>{status === 'online' ? '在线' : status === 'unstable' ? '连接不稳定' : '离线'}</Tag>;
@@ -39,11 +46,16 @@ const EdgeNodes: React.FC = () => {
   const nodeFilter = searchParams.get('node_id') || '';
   const [nodes, setNodes] = useState<EdgeNode[]>([]);
   const [sitePortals, setSitePortals] = useState<SitePortal[]>([]);
+  const [portalConfigs, setPortalConfigs] = useState<Record<string, PortalConfig>>({});
   const [loading, setLoading] = useState(true);
-  const [savingLoginSource, setSavingLoginSource] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [alias, setAlias] = useState('');
   const [activation, setActivation] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [portalConfigNode, setPortalConfigNode] = useState<EdgeNode | null>(null);
+  const [portalConfigCodes, setPortalConfigCodes] = useState<string[]>([]);
+  const [portalConfigDefault, setPortalConfigDefault] = useState('');
+  const [portalConfigLoading, setPortalConfigLoading] = useState(false);
+  const [portalConfigSaving, setPortalConfigSaving] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [connectionFilter, setConnectionFilter] = useState<string | undefined>();
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>();
@@ -54,8 +66,14 @@ const EdgeNodes: React.FC = () => {
         request('/admin/edge-nodes?page=1&page_size=100'),
         request('/admin/site-portals'),
       ]);
-      setNodes(nodeData?.items || []);
+      const loadedNodes: EdgeNode[] = nodeData?.items || [];
+      const loadedConfigs = await Promise.all(loadedNodes.map(async node => [
+        node.id,
+        await request(`/admin/edge-nodes/${encodeURIComponent(node.id)}/site-portals`),
+      ] as const));
+      setNodes(loadedNodes);
       setSitePortals(portalData || []);
+      setPortalConfigs(Object.fromEntries(loadedConfigs));
     }
     catch { message.error('节点信息加载失败'); }
     finally { setLoading(false); }
@@ -95,17 +113,31 @@ const EdgeNodes: React.FC = () => {
     try { await request(`/admin/edge-nodes/${node.id}/enabled`, { method: 'PATCH', body: JSON.stringify({ enabled }) }); load(); }
     catch { message.error('状态更新失败'); }
   };
-  const saveLoginSource = async (node: EdgeNode, loginSource: string) => {
-    setSavingLoginSource(node.id);
+  const openPortalConfig = async (node: EdgeNode) => {
+    setPortalConfigNode(node);
+    setPortalConfigLoading(true);
     try {
-      const data = await request(`/admin/edge-nodes/${node.id}/login-source`, {
-        method: 'PATCH',
-        body: JSON.stringify({ login_source: loginSource }),
+      const data = portalConfigs[node.id] || await request(`/admin/edge-nodes/${encodeURIComponent(node.id)}/site-portals`);
+      const configuredCodes = (data?.portals || []).map((portal: SitePortal) => portal.code);
+      setPortalConfigCodes(configuredCodes);
+      setPortalConfigDefault(data?.default_code || '');
+    } catch { message.error('Site Portal 配置加载失败'); setPortalConfigNode(null); }
+    finally { setPortalConfigLoading(false); }
+  };
+  const savePortalConfig = async () => {
+    if (!portalConfigNode) return;
+    if (portalConfigCodes.length === 0 || !portalConfigDefault) { message.error('至少选择一个 Site Portal，并设置默认入口'); return; }
+    setPortalConfigSaving(true);
+    try {
+      const data = await request(`/admin/edge-nodes/${encodeURIComponent(portalConfigNode.id)}/site-portals`, {
+        method: 'PUT',
+        body: JSON.stringify({ portal_codes: portalConfigCodes, default_code: portalConfigDefault }),
       });
-      setNodes(current => current.map(item => item.id === node.id ? { ...item, login_source: data?.login_source || loginSource } : item));
-      message.success('登录源已保存');
-    } catch { message.error('登录源保存失败'); }
-    finally { setSavingLoginSource(null); }
+      setPortalConfigs(current => ({ ...current, [portalConfigNode.id]: data }));
+      message.success('Site Portal 配置已保存');
+      setPortalConfigNode(null);
+    } catch (error) { message.error(error instanceof Error ? error.message : 'Site Portal 配置保存失败'); }
+    finally { setPortalConfigSaving(false); }
   };
   const remove = (node: EdgeNode) => Modal.confirm({
     title: '删除节点？', content: `删除后该节点的专属凭据将失效，节点需要重新激活。\n${node.id}`,
@@ -149,25 +181,10 @@ const EdgeNodes: React.FC = () => {
     { title: '节点最后心跳', dataIndex: 'last_heartbeat', width: 150, sorter: (a, b) => String(a.last_heartbeat || '').localeCompare(String(b.last_heartbeat || '')), render: value => <DateTimeValue value={value} /> },
     { title: '节点版本', dataIndex: 'version', width: 90, sorter: (a, b) => (a.version || '').localeCompare(b.version || ''), render: value => value || '-' },
     {
-      title: '登录源',
-      width: 180,
+      title: 'Site Portal',
+      width: 150,
       render: (_, node) => (
-        <Select
-          data-testid={`node-login-source-${node.id}`}
-          aria-label={`节点 ${node.alias || node.name || node.id} 登录源`}
-          value={node.login_source || 'official'}
-          loading={savingLoginSource === node.id}
-          style={{ minWidth: 150 }}
-          options={[
-            { value: 'official', label: '官方入口' },
-            ...sitePortals.map(portal => ({
-              value: portal.code,
-              label: portal.display_name,
-              disabled: !portal.enabled,
-            })),
-          ]}
-          onChange={value => saveLoginSource(node, value)}
-        />
+        <Button data-testid={`node-site-portals-${node.id}`} icon={<SettingOutlined />} onClick={() => void openPortalConfig(node)}>配置入口</Button>
       ),
     },
     { title: '节点启用状态', width: 105, render: (_, node) => <Switch checked={node.enabled} disabled={node.registration_state === 'pending_activation'} onChange={value => toggle(node, value)} /> },
@@ -196,6 +213,46 @@ const EdgeNodes: React.FC = () => {
       <Typography.Paragraph>请在 Edge 的初始激活界面填写 Cloud URL 和以下激活码。激活码仅显示一次，10 分钟后失效。</Typography.Paragraph>
       <Typography.Title level={3} copyable={{ text: activation?.code }}>{activation?.code}</Typography.Title>
       <Space align="start"><Typography.Text type="secondary">失效时间：</Typography.Text><DateTimeValue value={activation?.expiresAt} /></Space>
+    </Modal>
+    <Modal
+      open={!!portalConfigNode}
+      title={portalConfigNode ? `配置 ${portalConfigNode.alias || portalConfigNode.name || portalConfigNode.id} 的 Site Portal` : '配置 Site Portal'}
+      okText="保存配置"
+      cancelText="取消"
+      confirmLoading={portalConfigSaving}
+      onOk={() => void savePortalConfig()}
+      onCancel={() => setPortalConfigNode(null)}
+      destroyOnClose
+    >
+      {portalConfigLoading ? <Typography.Text>加载中...</Typography.Text> : <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <div>
+          <Typography.Text strong>可选入口</Typography.Text>
+          <Typography.Paragraph type="secondary">终端扫码后的入口只能从这里选择。已停用的 Portal 不能继续关联，请先完成迁移。</Typography.Paragraph>
+          <Checkbox.Group
+            value={portalConfigCodes}
+            onChange={values => {
+              const nextCodes = values as string[];
+              setPortalConfigCodes(nextCodes);
+              if (portalConfigDefault && !nextCodes.includes(portalConfigDefault)) setPortalConfigDefault('');
+            }}
+            options={sitePortals.map(portal => ({
+              value: portal.code,
+              label: portal.enabled ? portal.display_name : `${portal.display_name}（已停用）`,
+              disabled: !portal.enabled && !portalConfigCodes.includes(portal.code),
+            }))}
+          />
+        </div>
+        <div>
+          <Typography.Text strong>默认入口</Typography.Text>
+          <Select
+            value={portalConfigDefault || undefined}
+            placeholder="请选择默认入口"
+            style={{ width: '100%', marginTop: 8 }}
+            options={sitePortals.filter(portal => portalConfigCodes.includes(portal.code)).map(portal => ({ value: portal.code, label: portal.enabled ? portal.display_name : `${portal.display_name}（已停用）`, disabled: !portal.enabled }))}
+            onChange={setPortalConfigDefault}
+          />
+        </div>
+      </Space>}
     </Modal>
   </div>;
 };

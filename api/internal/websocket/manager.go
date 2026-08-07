@@ -395,21 +395,23 @@ func (m *ConnectionManager) prepareFileAccessToken(nodeID string, job *models.Pr
 func (m *ConnectionManager) dispatchPrintJob(nodeID string, job *models.PrintJob, fileAccessToken string, fileAccessTokenExpiresAt *time.Time) error {
 	// 构造打印任务数据
 	printJobData := PrintJobData{
-		JobID:                job.ID,
-		Name:                 job.Name,
-		PrinterID:            job.PrinterID,
-		FilePath:             job.FilePath,
-		FileURL:              job.FileURL,
-		ContentHash:          job.ContentHash,
-		FileSize:             job.FileSize,
-		PageCount:            job.PageCount,
-		Copies:               job.Copies,
-		PaperSize:            job.PaperSize,
-		ColorMode:            job.ColorMode,
-		DuplexMode:           job.DuplexMode,
-		MaxRetries:           job.MaxRetries,
-		TerminalSessionID:    job.TerminalSessionID,
-		TerminalTicketHash:   job.TerminalTicketHash,
+		JobID:              job.ID,
+		Name:               job.Name,
+		PrinterID:          job.PrinterID,
+		FilePath:           job.FilePath,
+		FileURL:            job.FileURL,
+		ContentHash:        job.ContentHash,
+		FileSize:           job.FileSize,
+		PageCount:          job.PageCount,
+		Copies:             job.Copies,
+		PaperSize:          job.PaperSize,
+		Orientation:        job.Orientation,
+		ScalePercent:       job.ScalePercent,
+		ColorMode:          job.ColorMode,
+		DuplexMode:         job.DuplexMode,
+		MaxRetries:         job.MaxRetries,
+		TerminalSessionID:  job.TerminalSessionID,
+		TerminalTicketHash: job.TerminalTicketHash,
 	}
 
 	// 如果有文件URL，填充（复用或新生成）下载凭证
