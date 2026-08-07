@@ -17,35 +17,37 @@ import (
 
 // WebSocketHandler WebSocket 处理器
 type WebSocketHandler struct {
-	manager             *ConnectionManager
-	printerRepo         *database.PrinterRepository
-	edgeNodeRepo        *database.EdgeNodeRepository
-	printJobRepo        *database.PrintJobRepository
-	fileRepo            *database.FileRepository
-	tokenManager        *security.TokenManager
-	allowedOrigins      []string // 允许的Origin列表
-	statusService       *operations.StatusService
-	receipts            *database.EdgeJobUpdateReceiptRepository
-	terminalSessions    *database.TerminalSessionRepository
-	terminalTickets     *database.TerminalTicketRepository
-	uploadSessions      *database.TerminalUploadSessionRepository
+	manager          *ConnectionManager
+	printerRepo      *database.PrinterRepository
+	edgeNodeRepo     *database.EdgeNodeRepository
+	printJobRepo     *database.PrintJobRepository
+	fileRepo         *database.FileRepository
+	tokenManager     *security.TokenManager
+	allowedOrigins   []string // 允许的Origin列表
+	statusService    *operations.StatusService
+	receipts         *database.EdgeJobUpdateReceiptRepository
+	terminalSessions *database.TerminalSessionRepository
+	terminalTickets  *database.TerminalTicketRepository
+	entrySessions    *database.EntrySessionRepository
+	uploadSessions   *database.TerminalUploadSessionRepository
 }
 
 // NewWebSocketHandler 创建 WebSocket 处理器
-func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, allowedOrigins []string, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository) *WebSocketHandler {
+func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, allowedOrigins []string, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, entrySessions *database.EntrySessionRepository, uploadSessions *database.TerminalUploadSessionRepository) *WebSocketHandler {
 	return &WebSocketHandler{
-		manager:             manager,
-		printerRepo:         printerRepo,
-		edgeNodeRepo:        edgeNodeRepo,
-		printJobRepo:        printJobRepo,
-		fileRepo:            fileRepo,
-		tokenManager:        tokenManager,
-		allowedOrigins:      allowedOrigins,
-		statusService:       statusService,
-		receipts:            receipts,
-		terminalSessions:    terminalSessions,
-		terminalTickets:     terminalTickets,
-		uploadSessions:      uploadSessions,
+		manager:          manager,
+		printerRepo:      printerRepo,
+		edgeNodeRepo:     edgeNodeRepo,
+		printJobRepo:     printJobRepo,
+		fileRepo:         fileRepo,
+		tokenManager:     tokenManager,
+		allowedOrigins:   allowedOrigins,
+		statusService:    statusService,
+		receipts:         receipts,
+		terminalSessions: terminalSessions,
+		terminalTickets:  terminalTickets,
+		entrySessions:    entrySessions,
+		uploadSessions:   uploadSessions,
 	}
 }
 
@@ -144,7 +146,7 @@ func (h *WebSocketHandler) HandleConnection(c *gin.Context) {
 	}
 
 	// 创建连接对象
-	connection := NewConnection(nodeID, conn, h.manager, h.printerRepo, h.edgeNodeRepo, h.printJobRepo, h.fileRepo, h.tokenManager, h.statusService, h.receipts, h.terminalSessions, h.terminalTickets, h.uploadSessions)
+	connection := NewConnection(nodeID, conn, h.manager, h.printerRepo, h.edgeNodeRepo, h.printJobRepo, h.fileRepo, h.tokenManager, h.statusService, h.receipts, h.terminalSessions, h.terminalTickets, h.entrySessions, h.uploadSessions)
 
 	// 注册连接
 	h.manager.register <- connection

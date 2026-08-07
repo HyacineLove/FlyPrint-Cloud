@@ -24,13 +24,14 @@ var (
 )
 
 type CompletePortalLoginInput struct {
-	SitePortalCode string
-	TicketHash     string
-	ExternalUserID string
-	DisplayName    string
-	ClaimCode      string
-	ClaimExpiresAt time.Time
-	Now            time.Time
+	SitePortalCode  string
+	TicketHash      string
+	PortalAttemptID string
+	ExternalUserID  string
+	DisplayName     string
+	ClaimCode       string
+	ClaimExpiresAt  time.Time
+	Now             time.Time
 }
 
 type ExternalIdentityRepository struct {
@@ -63,7 +64,7 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 	input.SitePortalCode = strings.TrimSpace(input.SitePortalCode)
 	input.ExternalUserID = strings.TrimSpace(input.ExternalUserID)
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
-	if input.SitePortalCode == "" || input.TicketHash == "" || input.ExternalUserID == "" ||
+	if input.SitePortalCode == "" || (input.TicketHash == "" && input.PortalAttemptID == "") || input.ExternalUserID == "" ||
 		input.DisplayName == "" || input.Now.IsZero() {
 		return nil, ErrPortalLoginTicketInvalid
 	}
@@ -81,28 +82,48 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		claimBaseURL                         string
 		portalEnabled                        bool
 	)
-	err = tx.QueryRow(`SELECT ticket.node_id,ticket.printer_id,ticket.terminal_session_id,
-		COALESCE(ticket.selected_entry,''),ticket.status,ticket.expires_at,
-		portal.claim_base_url,portal.enabled
-		FROM terminal_tickets ticket
-		JOIN edge_terminal_sessions session ON session.node_id=ticket.node_id
-			AND session.terminal_session_id=ticket.terminal_session_id
-			AND session.terminal_ticket_hash=ticket.ticket_hash
-		JOIN edge_nodes node ON node.id=ticket.node_id
-			AND node.deleted_at IS NULL AND node.enabled=true
-		JOIN site_portals portal ON portal.code=$2
-		WHERE ticket.ticket_hash=$1
-		FOR UPDATE OF ticket`, input.TicketHash, input.SitePortalCode).Scan(
-		&nodeID, &printerID, &terminalSessionID, &selectedEntry, &ticketStatus,
-		&expiresAt, &claimBaseURL, &portalEnabled,
-	)
+	if input.PortalAttemptID != "" {
+		err = tx.QueryRow(`SELECT entry.node_id,entry.printer_id::text,entry.terminal_session_id,
+			attempt.site_portal_code,attempt.status,entry.expires_at,portal.claim_base_url,portal.enabled
+			FROM entry_portal_attempts attempt
+			JOIN entry_sessions entry ON entry.id=attempt.entry_session_id
+			JOIN edge_terminal_sessions session ON session.node_id=entry.node_id
+				AND session.terminal_session_id=entry.terminal_session_id AND session.qr_generation=entry.qr_generation
+			JOIN edge_nodes node ON node.id=entry.node_id AND node.deleted_at IS NULL AND node.enabled=true
+			JOIN site_portals portal ON portal.code=$2
+			WHERE attempt.id=$1::uuid AND attempt.site_portal_code=$2 AND attempt.status='opened'
+				AND attempt.version=entry.portal_attempt_version AND entry.status='entry_active'
+			FOR UPDATE OF attempt,entry`, input.PortalAttemptID, input.SitePortalCode).Scan(
+			&nodeID, &printerID, &terminalSessionID, &selectedEntry, &ticketStatus, &expiresAt, &claimBaseURL, &portalEnabled,
+		)
+	} else {
+		err = tx.QueryRow(`SELECT ticket.node_id,ticket.printer_id,ticket.terminal_session_id,
+			COALESCE(ticket.selected_entry,''),ticket.status,ticket.expires_at,
+			portal.claim_base_url,portal.enabled
+			FROM terminal_tickets ticket
+			JOIN edge_terminal_sessions session ON session.node_id=ticket.node_id
+				AND session.terminal_session_id=ticket.terminal_session_id
+				AND session.terminal_ticket_hash=ticket.ticket_hash
+			JOIN edge_nodes node ON node.id=ticket.node_id
+				AND node.deleted_at IS NULL AND node.enabled=true
+			JOIN site_portals portal ON portal.code=$2
+			WHERE ticket.ticket_hash=$1
+			FOR UPDATE OF ticket`, input.TicketHash, input.SitePortalCode).Scan(
+			&nodeID, &printerID, &terminalSessionID, &selectedEntry, &ticketStatus,
+			&expiresAt, &claimBaseURL, &portalEnabled,
+		)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrPortalLoginTicketInvalid
 		}
 		return nil, fmt.Errorf("lock portal terminal ticket: %w", err)
 	}
-	if !portalEnabled || ticketStatus != "selected" || !expiresAt.After(input.Now) {
+	validStatus := "selected"
+	if input.PortalAttemptID != "" {
+		validStatus = "opened"
+	}
+	if !portalEnabled || ticketStatus != validStatus || !expiresAt.After(input.Now) {
 		return nil, ErrPortalLoginTicketInvalid
 	}
 	if selectedEntry != input.SitePortalCode {
@@ -166,13 +187,37 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		return nil, ErrPortalLoginTicketInvalid
 	}
 
-	result, err := tx.Exec(`UPDATE terminal_tickets SET status='consumed',consumed_at=$2
-		WHERE ticket_hash=$1 AND status='selected'`, input.TicketHash, input.Now)
-	if err != nil {
-		return nil, fmt.Errorf("consume portal terminal ticket: %w", err)
-	}
-	if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
-		return nil, ErrPortalLoginTicketInvalid
+	if input.PortalAttemptID != "" {
+		claimHash := sha256.Sum256([]byte(input.ClaimCode))
+		result, updateErr := tx.Exec(`UPDATE entry_sessions SET status='claim_pending'
+			WHERE id=(SELECT entry_session_id FROM entry_portal_attempts WHERE id=$1::uuid)
+			AND status='entry_active'`, input.PortalAttemptID)
+		if updateErr != nil {
+			return nil, fmt.Errorf("complete entry session: %w", updateErr)
+		}
+		if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
+			return nil, ErrPortalLoginTicketInvalid
+		}
+		if _, err = tx.Exec(`UPDATE entry_portal_attempts SET status='completed' WHERE id=$1::uuid AND status='opened'`, input.PortalAttemptID); err != nil {
+			return nil, fmt.Errorf("complete portal attempt: %w", err)
+		}
+		if _, err = tx.Exec(`UPDATE entry_portal_attempts SET status='superseded'
+			WHERE entry_session_id=(SELECT entry_session_id FROM entry_portal_attempts WHERE id=$1::uuid) AND status IN ('issued','opened')`, input.PortalAttemptID); err != nil {
+			return nil, fmt.Errorf("retire portal attempts: %w", err)
+		}
+		if _, err = tx.Exec(`INSERT INTO entry_claims(entry_session_id,claim_hash,expires_at)
+			VALUES((SELECT entry_session_id FROM entry_portal_attempts WHERE id=$1::uuid),$2,$3)`, input.PortalAttemptID, hex.EncodeToString(claimHash[:]), input.ClaimExpiresAt); err != nil {
+			return nil, fmt.Errorf("persist entry claim: %w", err)
+		}
+	} else {
+		result, updateErr := tx.Exec(`UPDATE terminal_tickets SET status='consumed',consumed_at=$2
+			WHERE ticket_hash=$1 AND status='selected'`, input.TicketHash, input.Now)
+		if updateErr != nil {
+			return nil, fmt.Errorf("consume portal terminal ticket: %w", updateErr)
+		}
+		if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
+			return nil, ErrPortalLoginTicketInvalid
+		}
 	}
 	readyEventID := ""
 	if input.ClaimCode != "" && !input.ClaimExpiresAt.IsZero() {

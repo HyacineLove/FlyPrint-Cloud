@@ -18,176 +18,120 @@ const maxPortalClaimTTL = 5 * time.Minute
 type sitePortalAuthenticator interface {
 	GetByCode(code string) (*models.SitePortal, error)
 }
-
-type portalTicketReader interface {
-	GetValidByHash(hash string, now time.Time) (*models.TerminalTicket, error)
-}
-
-type portalSessionMatcher interface {
-	Matches(nodeID, sessionID, ticketHash string) (bool, error)
-}
-
 type portalLoginCompleter interface {
 	CompleteLogin(input database.CompletePortalLoginInput) (*models.PortalLoginCompletion, error)
 }
-
+type portalEntryStore interface {
+	ConsumeT3(t3Hash, portalCode string, now time.Time) (*models.EntryPortalAttempt, *models.EntrySession, error)
+	ValidateClaim(claimHash, nodeID, terminalSessionID string, generation int64, now time.Time) error
+}
 type portalReadyDispatcher interface {
 	DispatchPortalSessionReady(nodeID string, payload websocket.PortalSessionReadyPayload) error
 }
-
-type portalReadyOutbox interface {
-	MarkDelivered(eventID string) error
-}
+type portalReadyOutbox interface{ MarkDelivered(eventID string) error }
 
 type SitePortalHandler struct {
 	portals     sitePortalAuthenticator
-	tickets     portalTicketReader
-	sessions    portalSessionMatcher
+	entries     portalEntryStore
 	identities  portalLoginCompleter
 	dispatcher  portalReadyDispatcher
 	readyOutbox portalReadyOutbox
 	now         func() time.Time
 }
 
-func NewSitePortalHandler(
-	portals sitePortalAuthenticator,
-	tickets portalTicketReader,
-	sessions portalSessionMatcher,
-	identities portalLoginCompleter,
-	dispatcher portalReadyDispatcher,
-	readyOutboxes ...portalReadyOutbox,
-) *SitePortalHandler {
-	var readyOutbox portalReadyOutbox
+func NewSitePortalHandler(portals sitePortalAuthenticator, entries portalEntryStore, identities portalLoginCompleter, dispatcher portalReadyDispatcher, readyOutboxes ...portalReadyOutbox) *SitePortalHandler {
+	var outbox portalReadyOutbox
 	if len(readyOutboxes) > 0 {
-		readyOutbox = readyOutboxes[0]
+		outbox = readyOutboxes[0]
 	}
-	return &SitePortalHandler{
-		portals: portals, tickets: tickets, sessions: sessions,
-		identities: identities, dispatcher: dispatcher, readyOutbox: readyOutbox, now: time.Now,
-	}
+	return &SitePortalHandler{portals: portals, entries: entries, identities: identities, dispatcher: dispatcher, readyOutbox: outbox, now: time.Now}
 }
 
 type portalContextRequest struct {
-	TerminalTicket string `json:"terminal_ticket" binding:"required"`
+	Handoff string `json:"handoff" binding:"required"`
 }
-
 type completePortalLoginRequest struct {
-	TerminalTicket string    `json:"terminal_ticket" binding:"required"`
+	AttemptID      string    `json:"attempt_id" binding:"required"`
 	ExternalUserID string    `json:"external_user_id" binding:"required"`
 	DisplayName    string    `json:"display_name" binding:"required"`
 	ClaimCode      string    `json:"claim_code" binding:"required"`
 	ClaimExpiresAt time.Time `json:"claim_expires_at" binding:"required"`
 }
+type validateClaimRequest struct {
+	ClaimCode         string `json:"claim_code" binding:"required"`
+	NodeID            string `json:"node_id" binding:"required"`
+	TerminalSessionID string `json:"terminal_session_id" binding:"required"`
+	QRGeneration      int64  `json:"qr_generation" binding:"required"`
+}
 
 func (h *SitePortalHandler) authenticate(c *gin.Context) (*models.SitePortal, bool) {
 	clientType, _ := c.Get("client_type")
-	portalCode, _ := c.Get("site_portal_code")
-	code := strings.TrimSpace(c.GetHeader("X-FlyPrint-Site-Portal"))
-	portalCodeString, ok := portalCode.(string)
-	if clientType != "site_portal" || !ok || strings.TrimSpace(portalCodeString) == "" || (code != "" && code != portalCodeString) {
+	claimed, _ := c.Get("site_portal_code")
+	header := strings.TrimSpace(c.GetHeader("X-FlyPrint-Site-Portal"))
+	code, ok := claimed.(string)
+	if clientType != "site_portal" || !ok || strings.TrimSpace(code) == "" || (header != "" && header != code) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "site_portal_unauthorized"})
 		return nil, false
 	}
-	portal, err := h.portals.GetByCode(strings.TrimSpace(portalCodeString))
-	if err != nil {
+	p, err := h.portals.GetByCode(strings.TrimSpace(code))
+	if err != nil || p == nil || !p.Enabled {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "site_portal_unauthorized"})
 		return nil, false
 	}
-	return portal, true
+	return p, true
 }
 
+// Context is the one-time Cloud-side T3 consumer.  The returned attempt ID is
+// non-bearer correlation state for the Portal OAuth callback.
 func (h *SitePortalHandler) Context(c *gin.Context) {
-	portal, ok := h.authenticate(c)
+	p, ok := h.authenticate(c)
 	if !ok {
 		return
 	}
-	var input portalContextRequest
-	if err := c.ShouldBindJSON(&input); err != nil {
+	var in portalContextRequest
+	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_terminal_context"})
 		return
 	}
-	rawTicket := strings.TrimSpace(input.TerminalTicket)
-	ticket, err := h.tickets.GetValidByHash(ticketHash(rawTicket), h.now())
-	if err != nil || ticket.SelectedEntry == nil || *ticket.SelectedEntry != portal.Code {
-		c.JSON(http.StatusGone, gin.H{"error": "terminal_ticket_invalid"})
+	attempt, entry, err := h.entries.ConsumeT3(ticketHash(strings.TrimSpace(in.Handoff)), p.Code, h.now())
+	if err != nil {
+		c.JSON(http.StatusGone, gin.H{"error": "entry_handoff_invalid"})
 		return
 	}
-	matched, err := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash)
-	if err != nil || !matched {
-		c.JSON(http.StatusConflict, gin.H{"error": "terminal_session_invalid"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"site_portal_code":    portal.Code,
-		"node_id":             ticket.NodeID,
-		"printer_id":          ticket.PrinterID,
-		"terminal_session_id": ticket.TerminalSessionID,
-		"expires_at":          ticket.ExpiresAt,
-	})
+	c.JSON(http.StatusOK, gin.H{"portal_attempt_id": attempt.ID, "site_portal_code": p.Code, "node_id": entry.NodeID, "printer_id": entry.PrinterID, "terminal_session_id": entry.TerminalSessionID, "qr_generation": entry.QRGeneration, "expires_at": entry.ExpiresAt})
 }
 
 func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
-	portal, ok := h.authenticate(c)
+	p, ok := h.authenticate(c)
 	if !ok {
 		return
 	}
-	var input completePortalLoginRequest
-	if err := c.ShouldBindJSON(&input); err != nil {
+	var in completePortalLoginRequest
+	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_login_completion"})
 		return
 	}
-	input.TerminalTicket = strings.TrimSpace(input.TerminalTicket)
-	input.ExternalUserID = strings.TrimSpace(input.ExternalUserID)
-	input.DisplayName = strings.TrimSpace(input.DisplayName)
-	input.ClaimCode = strings.TrimSpace(input.ClaimCode)
+	in.AttemptID = strings.TrimSpace(in.AttemptID)
+	in.ExternalUserID = strings.TrimSpace(in.ExternalUserID)
+	in.DisplayName = strings.TrimSpace(in.DisplayName)
+	in.ClaimCode = strings.TrimSpace(in.ClaimCode)
 	now := h.now()
-	if input.TerminalTicket == "" || len(input.ExternalUserID) > 255 ||
-		input.DisplayName == "" || len([]rune(input.DisplayName)) > 120 ||
-		len(input.ClaimCode) < 12 || len(input.ClaimCode) > 256 ||
-		!input.ClaimExpiresAt.After(now) || input.ClaimExpiresAt.After(now.Add(maxPortalClaimTTL)) {
+	if in.AttemptID == "" || len(in.ExternalUserID) > 255 || in.DisplayName == "" || len([]rune(in.DisplayName)) > 120 || len(in.ClaimCode) < 12 || len(in.ClaimCode) > 256 || !in.ClaimExpiresAt.After(now) || in.ClaimExpiresAt.After(now.Add(maxPortalClaimTTL)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_login_completion"})
 		return
 	}
-
-	ticket, err := h.tickets.GetValidByHash(ticketHash(input.TerminalTicket), now)
-	if err != nil || ticket.SelectedEntry == nil || *ticket.SelectedEntry != portal.Code {
-		c.JSON(http.StatusGone, gin.H{"error": "terminal_ticket_invalid"})
-		return
-	}
-	matched, err := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash)
-	if err != nil || !matched {
-		c.JSON(http.StatusConflict, gin.H{"error": "terminal_session_invalid"})
-		return
-	}
-	completion, err := h.identities.CompleteLogin(database.CompletePortalLoginInput{
-		SitePortalCode: portal.Code,
-		TicketHash:     ticket.TicketHash,
-		ExternalUserID: input.ExternalUserID,
-		DisplayName:    input.DisplayName,
-		ClaimCode:      input.ClaimCode,
-		ClaimExpiresAt: input.ClaimExpiresAt,
-		Now:            now,
-	})
+	completion, err := h.identities.CompleteLogin(database.CompletePortalLoginInput{SitePortalCode: p.Code, PortalAttemptID: in.AttemptID, ExternalUserID: in.ExternalUserID, DisplayName: in.DisplayName, ClaimCode: in.ClaimCode, ClaimExpiresAt: in.ClaimExpiresAt, Now: now})
 	if err != nil {
-		switch {
-		case errors.Is(err, database.ErrExternalIdentityDisabled):
+		if errors.Is(err, database.ErrExternalIdentityDisabled) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "user_disabled"})
-		case errors.Is(err, database.ErrPortalLoginTicketInvalid),
-			errors.Is(err, database.ErrPortalLoginPortalMismatch):
-			c.JSON(http.StatusConflict, gin.H{"error": "terminal_ticket_invalid"})
-		default:
+		} else if errors.Is(err, database.ErrPortalLoginTicketInvalid) || errors.Is(err, database.ErrPortalLoginPortalMismatch) {
+			c.JSON(http.StatusConflict, gin.H{"error": "entry_attempt_invalid"})
+		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "login_completion_failed"})
 		}
 		return
 	}
-	payload := websocket.PortalSessionReadyPayload{
-		SitePortalCode:    completion.SitePortalCode,
-		ClaimBaseURL:      completion.ClaimBaseURL,
-		ClaimCode:         input.ClaimCode,
-		TerminalSessionID: completion.TerminalSessionID,
-		CloudUserID:       completion.CloudUserID,
-		ExpiresAt:         input.ClaimExpiresAt,
-	}
+	payload := websocket.PortalSessionReadyPayload{SitePortalCode: completion.SitePortalCode, ClaimBaseURL: completion.ClaimBaseURL, ClaimCode: in.ClaimCode, TerminalSessionID: completion.TerminalSessionID, CloudUserID: completion.CloudUserID, ExpiresAt: in.ClaimExpiresAt}
 	if err := h.dispatcher.DispatchPortalSessionReady(completion.NodeID, payload); err != nil {
 		if completion.ReadyEventID != "" && h.readyOutbox != nil {
 			c.JSON(http.StatusAccepted, gin.H{"cloud_user_id": completion.CloudUserID, "notification_pending": true})
@@ -203,4 +147,22 @@ func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"cloud_user_id": completion.CloudUserID})
+}
+
+// ValidateClaim lets a Portal prove its locally held Claim still belongs to a
+// live root session before returning identity material to Edge.
+func (h *SitePortalHandler) ValidateClaim(c *gin.Context) {
+	if _, ok := h.authenticate(c); !ok {
+		return
+	}
+	var in validateClaimRequest
+	if err := c.ShouldBindJSON(&in); err != nil || in.QRGeneration <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_claim_validation"})
+		return
+	}
+	if err := h.entries.ValidateClaim(ticketHash(strings.TrimSpace(in.ClaimCode)), strings.TrimSpace(in.NodeID), strings.TrimSpace(in.TerminalSessionID), in.QRGeneration, h.now()); err != nil {
+		c.JSON(http.StatusGone, gin.H{"error": "claim_invalid"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

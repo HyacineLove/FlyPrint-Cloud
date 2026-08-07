@@ -16,245 +16,81 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type fakeSitePortalAuthenticator struct {
-	portal *models.SitePortal
-	err    error
-}
+type fakeSitePortalAuthenticator struct{ portal *models.SitePortal }
 
 func (f *fakeSitePortalAuthenticator) GetByCode(code string) (*models.SitePortal, error) {
-	if f.err != nil || code != "official" {
+	if code != "official" {
 		return nil, database.ErrSitePortalUnauthorized
 	}
 	return f.portal, nil
 }
 
-type fakePortalTicketReader struct {
-	ticket *models.TerminalTicket
-	err    error
+type fakePortalEntries struct {
+	attempt      *models.EntryPortalAttempt
+	entry        *models.EntrySession
+	err          error
+	consumedHash string
+	validated    bool
 }
 
-func (f *fakePortalTicketReader) GetValidByHash(_ string, _ time.Time) (*models.TerminalTicket, error) {
-	return f.ticket, f.err
+func (f *fakePortalEntries) ConsumeT3(hash, _ string, _ time.Time) (*models.EntryPortalAttempt, *models.EntrySession, error) {
+	f.consumedHash = hash
+	return f.attempt, f.entry, f.err
 }
-
-type fakePortalSessionMatcher struct {
-	matched bool
-}
-
-func (f *fakePortalSessionMatcher) Matches(_, _, _ string) (bool, error) {
-	return f.matched, nil
+func (f *fakePortalEntries) ValidateClaim(_, _, _ string, _ int64, _ time.Time) error {
+	f.validated = true
+	return f.err
 }
 
 type fakePortalLoginCompleter struct {
-	calls      int
 	input      database.CompletePortalLoginInput
 	completion *models.PortalLoginCompletion
 	err        error
 }
 
-func (f *fakePortalLoginCompleter) CompleteLogin(input database.CompletePortalLoginInput) (*models.PortalLoginCompletion, error) {
-	f.calls++
-	f.input = input
+func (f *fakePortalLoginCompleter) CompleteLogin(in database.CompletePortalLoginInput) (*models.PortalLoginCompletion, error) {
+	f.input = in
 	return f.completion, f.err
 }
 
-type fakePortalReadyDispatcher struct {
-	connected bool
-	nodeID    string
-	payload   websocket.PortalSessionReadyPayload
-	err       error
+type fakePortalDispatcher struct{}
+
+func (*fakePortalDispatcher) DispatchPortalSessionReady(string, websocket.PortalSessionReadyPayload) error {
+	return nil
 }
 
-type fakePortalReadyOutbox struct {
-	ids []string
-	err error
-}
-
-func (f *fakePortalReadyOutbox) MarkDelivered(eventID string) error {
-	f.ids = append(f.ids, eventID)
-	return f.err
-}
-
-func (f *fakePortalReadyDispatcher) IsNodeConnected(_ string) bool {
-	return f.connected
-}
-
-func (f *fakePortalReadyDispatcher) DispatchPortalSessionReady(nodeID string, payload websocket.PortalSessionReadyPayload) error {
-	f.nodeID = nodeID
-	f.payload = payload
-	return f.err
-}
-
-func newSitePortalTestRouter(handler *SitePortalHandler) *gin.Engine {
+func newSitePortalTestRouter(h *SitePortalHandler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set("client_type", "site_portal")
-		c.Set("site_portal_code", "official")
-		c.Next()
-	})
-	router.POST("/context", handler.Context)
-	router.POST("/login-completions", handler.CompleteLogin)
-	return router
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("client_type", "site_portal"); c.Set("site_portal_code", "official") })
+	r.POST("/context", h.Context)
+	r.POST("/claims/validate", h.ValidateClaim)
+	return r
 }
 
-func sitePortalRequest(t *testing.T, router http.Handler, path string, body any) *httptest.ResponseRecorder {
-	t.Helper()
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatal(err)
+func TestSitePortalContextConsumesOnlyHandoff(t *testing.T) {
+	entries := &fakePortalEntries{attempt: &models.EntryPortalAttempt{ID: "attempt-1"}, entry: &models.EntrySession{NodeID: "node-1", PrinterID: "printer-1", TerminalSessionID: "session-1", QRGeneration: 7, ExpiresAt: time.Now().Add(time.Minute)}}
+	h := NewSitePortalHandler(&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official", Enabled: true}}, entries, &fakePortalLoginCompleter{}, &fakePortalDispatcher{})
+	body, _ := json.Marshal(map[string]string{"handoff": "t3-secret"})
+	w := httptest.NewRecorder()
+	newSitePortalTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/context", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
-	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-FlyPrint-Site-Portal", "official")
-	request.Header.Set("Authorization", "Bearer portal-token")
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, request)
-	return recorder
-}
-
-func TestSitePortalContextValidationDoesNotConsumeTerminalTicket(t *testing.T) {
-	selected := "official"
-	completer := &fakePortalLoginCompleter{}
-	handler := NewSitePortalHandler(
-		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official"}},
-		&fakePortalTicketReader{ticket: &models.TerminalTicket{
-			NodeID: "edge-1", PrinterID: "printer-1", TerminalSessionID: "session-1",
-			TicketHash: "ticket-hash", SelectedEntry: &selected, ExpiresAt: time.Now().Add(time.Minute),
-		}},
-		&fakePortalSessionMatcher{matched: true},
-		completer,
-		&fakePortalReadyDispatcher{connected: true},
-	)
-
-	recorder := sitePortalRequest(t, newSitePortalTestRouter(handler), "/context", map[string]string{
-		"terminal_ticket": "raw-ticket",
-	})
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
+	if entries.consumedHash != ticketHash("t3-secret") {
+		t.Fatal("handoff was not hashed before storage lookup")
 	}
-	if completer.calls != 0 {
-		t.Fatalf("context validation consumed login: calls=%d", completer.calls)
+	if bytes.Contains(w.Body.Bytes(), []byte("t3-secret")) {
+		t.Fatal("handoff leaked in context response")
 	}
 }
 
-func TestSitePortalLoginCompletionMapsUserThenSendsCredentialFreeReadyMessage(t *testing.T) {
-	now := time.Now().UTC()
-	selected := "official"
-	completer := &fakePortalLoginCompleter{completion: &models.PortalLoginCompletion{
-		NodeID: "edge-1", TerminalSessionID: "session-1", CloudUserID: "cloud-user-1",
-		SitePortalCode: "official", ClaimBaseURL: "https://portal.example.test",
-	}}
-	dispatcher := &fakePortalReadyDispatcher{connected: true}
-	handler := NewSitePortalHandler(
-		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official"}},
-		&fakePortalTicketReader{ticket: &models.TerminalTicket{
-			NodeID: "edge-1", TerminalSessionID: "session-1", TicketHash: "ticket-hash",
-			SelectedEntry: &selected, ExpiresAt: now.Add(time.Minute),
-		}},
-		&fakePortalSessionMatcher{matched: true},
-		completer,
-		dispatcher,
-	)
-
-	recorder := sitePortalRequest(t, newSitePortalTestRouter(handler), "/login-completions", map[string]any{
-		"terminal_ticket":  "raw-ticket",
-		"external_user_id": "external-user-1",
-		"display_name":     "张老师",
-		"claim_code":       "claim-code-1",
-		"claim_expires_at": now.Add(4 * time.Minute),
-	})
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
-	}
-	if completer.calls != 1 || dispatcher.nodeID != "edge-1" {
-		t.Fatalf("complete calls=%d dispatch node=%q", completer.calls, dispatcher.nodeID)
-	}
-	if dispatcher.payload.ClaimCode != "claim-code-1" ||
-		dispatcher.payload.TerminalSessionID != "session-1" ||
-		dispatcher.payload.CloudUserID != "cloud-user-1" {
-		t.Fatalf("unexpected ready payload: %#v", dispatcher.payload)
-	}
-	raw, err := json.Marshal(dispatcher.payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{"access_token", "cookie", "password"} {
-		if bytes.Contains(raw, []byte(forbidden)) {
-			t.Fatalf("private field %q leaked: %s", forbidden, raw)
-		}
-	}
-}
-
-func TestSitePortalLoginCompletionPersistsNotificationWhenEdgeIsOffline(t *testing.T) {
-	selected := "official"
-	completer := &fakePortalLoginCompleter{completion: &models.PortalLoginCompletion{
-		NodeID: "edge-1", TerminalSessionID: "session-1", CloudUserID: "cloud-user-1",
-		SitePortalCode: "official", ClaimBaseURL: "https://portal.example.test", ReadyEventID: "event-1",
-	}}
-	outbox := &fakePortalReadyOutbox{}
-	handler := NewSitePortalHandler(
-		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official"}},
-		&fakePortalTicketReader{ticket: &models.TerminalTicket{
-			NodeID: "edge-1", TerminalSessionID: "session-1", TicketHash: "ticket-hash",
-			SelectedEntry: &selected, ExpiresAt: time.Now().Add(time.Minute),
-		}},
-		&fakePortalSessionMatcher{matched: true},
-		completer,
-		&fakePortalReadyDispatcher{connected: false, err: errors.New("edge offline")},
-		outbox,
-	)
-
-	recorder := sitePortalRequest(t, newSitePortalTestRouter(handler), "/login-completions", map[string]any{
-		"terminal_ticket":  "raw-ticket",
-		"external_user_id": "external-user-1",
-		"display_name":     "张老师",
-		"claim_code":       "claim-code-1",
-		"claim_expires_at": time.Now().Add(4 * time.Minute),
-	})
-
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
-	}
-	if completer.calls != 1 || len(outbox.ids) != 0 {
-		t.Fatalf("offline Edge must leave durable notification pending: calls=%d ids=%v", completer.calls, outbox.ids)
-	}
-}
-
-func TestSitePortalLoginCompletionKeepsDurableNotificationPendingWhenDispatchFails(t *testing.T) {
-	now := time.Now().UTC()
-	selected := "official"
-	completer := &fakePortalLoginCompleter{completion: &models.PortalLoginCompletion{
-		NodeID: "edge-1", TerminalSessionID: "session-1", CloudUserID: "cloud-user-1",
-		SitePortalCode: "official", ClaimBaseURL: "https://portal.example.test", ReadyEventID: "event-1",
-	}}
-	outbox := &fakePortalReadyOutbox{}
-	handler := NewSitePortalHandler(
-		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official"}},
-		&fakePortalTicketReader{ticket: &models.TerminalTicket{
-			NodeID: "edge-1", TerminalSessionID: "session-1", TicketHash: "ticket-hash",
-			SelectedEntry: &selected, ExpiresAt: now.Add(time.Minute),
-		}},
-		&fakePortalSessionMatcher{matched: true},
-		completer,
-		&fakePortalReadyDispatcher{connected: true, err: errors.New("websocket send failed")},
-		outbox,
-	)
-
-	recorder := sitePortalRequest(t, newSitePortalTestRouter(handler), "/login-completions", map[string]any{
-		"terminal_ticket":  "raw-ticket",
-		"external_user_id": "external-user-1",
-		"display_name":     "张老师",
-		"claim_code":       "claim-code-1",
-		"claim_expires_at": now.Add(4 * time.Minute),
-	})
-
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
-	}
-	if len(outbox.ids) != 0 {
-		t.Fatalf("failed dispatch must remain pending, marked ids=%v", outbox.ids)
+func TestValidateClaimRejectsInvalidRoot(t *testing.T) {
+	entries := &fakePortalEntries{err: errors.New("invalid")}
+	h := NewSitePortalHandler(&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official", Enabled: true}}, entries, &fakePortalLoginCompleter{}, &fakePortalDispatcher{})
+	w := httptest.NewRecorder()
+	newSitePortalTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/claims/validate", bytes.NewBufferString(`{"claim_code":"claim","node_id":"n","terminal_session_id":"s","qr_generation":1}`)))
+	if w.Code != http.StatusGone {
+		t.Fatalf("status=%d", w.Code)
 	}
 }

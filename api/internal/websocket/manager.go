@@ -228,6 +228,19 @@ func (m *ConnectionManager) DispatchPortalSessionReady(nodeID string, payload Po
 	return m.SendToNode(nodeID, message)
 }
 
+// DispatchTerminalMask is intentionally fire-and-confirm.  A transport ACK
+// only proves receipt by the Edge process; browser entry remains blocked until
+// Edge later sends terminal_masked after its UI has rendered the mask.
+func (m *ConnectionManager) DispatchTerminalMask(nodeID, commandID string, payload TerminalMaskPayload) error {
+	message, err := json.Marshal(&Command{
+		Type: CmdTypeTerminalMask, CommandID: commandID, Timestamp: time.Now(), Target: nodeID, Data: payload,
+	})
+	if err != nil {
+		return err
+	}
+	return m.SendToNode(nodeID, message)
+}
+
 // MarkTerminalOccupied records pending occupy state and pushes terminal_occupied
 // with ACK. HTTP entry redirect must not block on the ACK wait.
 func (m *ConnectionManager) MarkTerminalOccupied(nodeID string, payload TerminalOccupiedPayload) {

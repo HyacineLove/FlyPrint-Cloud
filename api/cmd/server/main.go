@@ -161,9 +161,10 @@ func main() {
 	go startPortalReadyOutboxTask(context.Background(), portalReadyOutboxRepo, wsManager)
 	jobUpdateReceiptRepo := database.NewEdgeJobUpdateReceiptRepository(db)
 	terminalTicketRepo := database.NewTerminalTicketRepository(db)
+	entrySessionRepo := database.NewEntrySessionRepository(db)
 	terminalUploadSessions := database.NewTerminalUploadSessionRepository(db)
 	terminalSessionRepo := database.NewTerminalSessionRepository(db)
-	wsHandler := websocket.NewWebSocketHandler(wsManager, printerRepo, edgeNodeRepo, printJobRepo, fileRepo, tokenManager, cfg.Server.AllowedOrigins, statusService, jobUpdateReceiptRepo, terminalSessionRepo, terminalTicketRepo, terminalUploadSessions)
+	wsHandler := websocket.NewWebSocketHandler(wsManager, printerRepo, edgeNodeRepo, printJobRepo, fileRepo, tokenManager, cfg.Server.AllowedOrigins, statusService, jobUpdateReceiptRepo, terminalSessionRepo, terminalTicketRepo, entrySessionRepo, terminalUploadSessions)
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -238,8 +239,8 @@ func main() {
 	fileHandler := handlers.NewFileHandler(fileRepo, &cfg.Storage, storageService, wsManager, tokenManager, businessSettingsService, edgeNodeRepo, printerRepo)
 	fileHandler.SetTerminalUploadSessionBinder(terminalUploadSessions)
 	fileHandler.SetTerminalSessionMatcher(terminalSessionRepo)
-	terminalTicketHandler := handlers.NewTerminalTicketHandler(terminalTicketRepo, printerRepo, edgeNodeRepo, terminalUploadSessions, tokenManager, wsManager, terminalSessionRepo, sitePortalRepo)
-	sitePortalHandler := handlers.NewSitePortalHandler(sitePortalRepo, terminalTicketRepo, terminalSessionRepo, externalIdentityRepo, wsManager, portalReadyOutboxRepo)
+	terminalTicketHandler := handlers.NewTerminalTicketHandler(entrySessionRepo, printerRepo, edgeNodeRepo, wsManager, sitePortalRepo, cfg.Security.EntryCookieSecure)
+	sitePortalHandler := handlers.NewSitePortalHandler(sitePortalRepo, entrySessionRepo, externalIdentityRepo, wsManager, portalReadyOutboxRepo)
 	businessSettingsHandler := handlers.NewBusinessSettingsHandler(businessSettingsService)
 	opsContactHandler := handlers.NewOpsContactHandler(opsContactRepo, businessSettingsService)
 	healthHandler := handlers.NewHealthHandler(db, wsManager)
@@ -343,6 +344,7 @@ func ensureBootstrapSitePortalClient(repo *database.OAuth2ClientRepository, ciph
 
 func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandler *handlers.EdgeNodeHandler, edgeActivationHandler *handlers.EdgeActivationHandler, printerHandler *handlers.PrinterHandler, printJobHandler *handlers.PrintJobHandler, portalPrintHandler *handlers.PortalPrintHandler, wsHandler *websocket.WebSocketHandler, oauth2Handler *handlers.OAuth2Handler, fileHandler *handlers.FileHandler, terminalTicketHandler *handlers.TerminalTicketHandler, sitePortalHandler *handlers.SitePortalHandler, sitePortalAdminHandler *handlers.SitePortalAdminHandler, businessSettingsHandler *handlers.BusinessSettingsHandler, opsContactHandler *handlers.OpsContactHandler, healthHandler *handlers.HealthHandler, printJobRepo *database.PrintJobRepository, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, alertRepo *database.OperationalAlertRepository) {
 	r.GET("/entry", terminalTicketHandler.EntryPage)
+	r.GET("/entry/options", terminalTicketHandler.SelectPage)
 	// Swagger 文档路由
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
@@ -372,8 +374,11 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 		{
 			sitePortalGroup.POST("/context", sitePortalHandler.Context)
 			sitePortalGroup.POST("/login-completions", sitePortalHandler.CompleteLogin)
+			sitePortalGroup.POST("/claims/validate", sitePortalHandler.ValidateClaim)
 		}
 
+		apiV1Group.POST("/public/terminal-entry/acquire", terminalTicketHandler.Acquire)
+		apiV1Group.GET("/public/terminal-entry/status", terminalTicketHandler.EntryStatus)
 		apiV1Group.POST("/public/terminal-entry/select", terminalTicketHandler.SelectEntry)
 		// 详细健康检查（包含各组件状态）
 		apiV1Group.GET("/health", healthHandler.DetailedHealth)

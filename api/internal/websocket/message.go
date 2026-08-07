@@ -16,7 +16,9 @@ const (
 	MsgTypeJobUpdate            = "job_update"
 	MsgTypeSubmitPrintParams    = "submit_print_params"
 	MsgTypeRequestUploadToken   = "request_upload_token" // 请求上传凭证
+	MsgTypeRequestEntryTicket   = "request_entry_ticket"
 	MsgTypeTerminalSessionState = "terminal_session_state"
+	MsgTypeTerminalMasked       = "terminal_masked"
 	MsgTypeAck                  = "ack" // 确认消息
 )
 
@@ -29,8 +31,10 @@ const (
 	CmdTypeNodeState          = "node_state"
 	CmdTypeError              = "error"        // 错误消息，用于通知 Edge 端操作失败
 	CmdTypeUploadToken        = "upload_token" // 下发上传凭证
+	CmdTypeEntryTicket        = "entry_ticket"
 	CmdTypeJobUpdateAck       = "job_update_ack"
 	CmdTypeTerminalOccupied   = "terminal_occupied" // 进门票已签发，一体机应遮挡二维码
+	CmdTypeTerminalMask       = "terminal_mask"
 	CmdTypePortalSessionReady = "portal_session_ready"
 )
 
@@ -158,6 +162,21 @@ type RequestUploadTokenPayload struct {
 	PrinterID string `json:"printer_id"` // 目标打印机ID
 }
 
+// RequestEntryTicketPayload asks Cloud for a T1 bound to the already reported
+// interactive Edge session.  It is unrelated to file upload credentials.
+type RequestEntryTicketPayload struct {
+	RequestID    string `json:"request_id"`
+	PrinterID    string `json:"printer_id"`
+	QRGeneration int64  `json:"qr_generation"`
+}
+
+type EntryTicketResponsePayload struct {
+	RequestID string    `json:"request_id"`
+	Ticket    string    `json:"ticket"`
+	EntryURL  string    `json:"entry_url"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // TerminalSessionStateData is reported whenever the kiosk creates or clears a
 // local interactive session. Empty fields explicitly mean Edge has no active
 // session (including immediately after restart).
@@ -165,6 +184,13 @@ type TerminalSessionStateData struct {
 	TerminalSessionID  string `json:"terminal_session_id"`
 	TerminalTicketHash string `json:"terminal_ticket_hash"`
 	EntryType          string `json:"entry_type"`
+	QRGeneration       int64  `json:"qr_generation"`
+}
+
+type TerminalMaskedPayload struct {
+	CommandID         string `json:"command_id"`
+	TerminalSessionID string `json:"terminal_session_id"`
+	QRGeneration      int64  `json:"qr_generation"`
 }
 
 // TerminalOccupiedPayload tells Edge a phone has entered via the current QR
@@ -173,6 +199,13 @@ type TerminalOccupiedPayload struct {
 	TerminalSessionID  string    `json:"terminal_session_id"`
 	TerminalTicketHash string    `json:"terminal_ticket_hash"`
 	ExpiresAt          time.Time `json:"expires_at"`
+}
+
+type TerminalMaskPayload struct {
+	EntrySessionID    string    `json:"entry_session_id"`
+	TerminalSessionID string    `json:"terminal_session_id"`
+	QRGeneration      int64     `json:"qr_generation"`
+	ExpiresAt         time.Time `json:"expires_at"`
 }
 
 // PortalSessionReadyPayload intentionally carries only the one-time claim

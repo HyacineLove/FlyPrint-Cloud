@@ -105,16 +105,17 @@ type SecurityConfig struct {
 	OAuthClientSecretEncryptionKey string `mapstructure:"oauth_client_secret_encryption_key"`
 	UploadTokenTTL                 int    `mapstructure:"upload_token_ttl"`
 	DownloadTokenTTL               int    `mapstructure:"download_token_ttl"`
+	EntryCookieSecure              bool   `mapstructure:"entry_cookie_secure"`
 }
 
 // SitePortalBootstrapConfig installs the first Site Portal and its dedicated
 // OAuth client during deployment.
 type SitePortalBootstrapConfig struct {
-	Code             string `mapstructure:"code"`
-	DisplayName      string `mapstructure:"display_name"`
-	EntryURL         string `mapstructure:"entry_url"`
-	ClaimBaseURL     string `mapstructure:"claim_base_url"`
-	OAuthClientID    string `mapstructure:"oauth_client_id"`
+	Code              string `mapstructure:"code"`
+	DisplayName       string `mapstructure:"display_name"`
+	EntryURL          string `mapstructure:"entry_url"`
+	ClaimBaseURL      string `mapstructure:"claim_base_url"`
+	OAuthClientID     string `mapstructure:"oauth_client_id"`
 	OAuthClientSecret string `mapstructure:"oauth_client_secret"`
 }
 
@@ -285,6 +286,9 @@ func (c *Config) Validate() error {
 	if c.Security.DownloadTokenTTL <= 0 {
 		return fmt.Errorf("security.download_token_ttl must be greater than 0")
 	}
+	if !c.App.Debug && !c.Security.EntryCookieSecure {
+		return fmt.Errorf("security.entry_cookie_secure must be true outside development/test")
+	}
 
 	if err := c.SitePortalBootstrap.Validate(); err != nil {
 		return err
@@ -392,6 +396,7 @@ func setDefaults() {
 	viper.SetDefault("security.oauth_client_secret_encryption_key", "")
 	viper.SetDefault("security.upload_token_ttl", 180)   // 3分钟
 	viper.SetDefault("security.download_token_ttl", 180) // 3分钟
+	viper.SetDefault("security.entry_cookie_secure", true)
 	viper.SetDefault("site_portal_bootstrap.code", "")
 	viper.SetDefault("site_portal_bootstrap.display_name", "")
 	viper.SetDefault("site_portal_bootstrap.entry_url", "")

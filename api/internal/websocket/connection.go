@@ -1,7 +1,9 @@
 package websocket
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -98,6 +100,7 @@ type Connection struct {
 	Receipts         *database.EdgeJobUpdateReceiptRepository
 	TerminalSessions *database.TerminalSessionRepository
 	TerminalTickets  *database.TerminalTicketRepository
+	EntrySessions    *database.EntrySessionRepository
 	UploadSessions   *database.TerminalUploadSessionRepository
 
 	// ACK 机制相关
@@ -106,7 +109,7 @@ type Connection struct {
 }
 
 // NewConnection 创建新连接
-func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, uploadSessions *database.TerminalUploadSessionRepository) *Connection {
+func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, entrySessions *database.EntrySessionRepository, uploadSessions *database.TerminalUploadSessionRepository) *Connection {
 	return &Connection{
 		NodeID:           nodeID,
 		Conn:             conn,
@@ -122,6 +125,7 @@ func NewConnection(nodeID string, conn *websocket.Conn, manager *ConnectionManag
 		Receipts:         receipts,
 		TerminalSessions: terminalSessions,
 		TerminalTickets:  terminalTickets,
+		EntrySessions:    entrySessions,
 		UploadSessions:   uploadSessions,
 		pendingAcks:      make(map[string]chan string),
 	}
@@ -293,8 +297,12 @@ func (c *Connection) handleMessage(msg *Message) {
 		c.handleSubmitPrintParams(msg)
 	case MsgTypeRequestUploadToken:
 		c.handleRequestUploadToken(msg)
+	case MsgTypeRequestEntryTicket:
+		c.handleRequestEntryTicket(msg)
 	case MsgTypeTerminalSessionState:
 		c.handleTerminalSessionState(msg)
+	case MsgTypeTerminalMasked:
+		c.handleTerminalMasked(msg)
 	case MsgTypeAck:
 		c.handleAck(msg)
 	default:
@@ -337,6 +345,11 @@ func (c *Connection) handleTerminalSessionState(msg *Message) {
 	previous, _ := c.TerminalSessions.Get(c.NodeID)
 	sessionChanged := previous == nil || previous.TerminalSessionID != payload.TerminalSessionID
 	if sessionChanged {
+		if c.EntrySessions != nil {
+			if err := c.EntrySessions.InvalidateForNode(c.NodeID); err != nil {
+				logger.Warn("Failed to invalidate entry sessions on terminal refresh", zap.String("node_id", c.NodeID), zap.Error(err))
+			}
+		}
 		if c.TerminalTickets != nil {
 			if err := c.TerminalTickets.CancelActiveForNode(c.NodeID); err != nil {
 				logger.Warn("Failed to cancel terminal tickets on session refresh", zap.String("node_id", c.NodeID), zap.Error(err))
@@ -352,7 +365,7 @@ func (c *Connection) handleTerminalSessionState(msg *Message) {
 		}
 	}
 
-	if err := c.TerminalSessions.Report(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash, payload.EntryType, time.Now()); err != nil {
+	if err := c.TerminalSessions.ReportWithGeneration(c.NodeID, payload.TerminalSessionID, payload.TerminalTicketHash, payload.EntryType, payload.QRGeneration, time.Now()); err != nil {
 		logger.Error("Failed to persist terminal session state", zap.String("node_id", c.NodeID), zap.Error(err))
 		return
 	}
@@ -369,6 +382,70 @@ func (c *Connection) handleTerminalSessionState(msg *Message) {
 				ExpiresAt:          ticket.ExpiresAt,
 			}, edgeHasTicket)
 		}
+	}
+}
+
+func (c *Connection) handleTerminalMasked(msg *Message) {
+	if c.EntrySessions == nil {
+		return
+	}
+	var payload TerminalMaskedPayload
+	data, err := json.Marshal(msg.Data)
+	if err != nil || json.Unmarshal(data, &payload) != nil || payload.CommandID == "" {
+		return
+	}
+	if err := c.EntrySessions.MarkMasked(c.NodeID, payload.CommandID, time.Now()); err != nil {
+		logger.Warn("Rejected terminal mask confirmation", zap.String("node_id", c.NodeID), zap.Error(err))
+	}
+}
+
+func entryCredential() (string, string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+	raw := base64.RawURLEncoding.EncodeToString(b)
+	digest := sha256.Sum256([]byte(raw))
+	return raw, fmt.Sprintf("%x", digest), nil
+}
+
+// handleRequestEntryTicket issues T1 only for the Edge session already stored
+// by terminal_session_state.  This ordering gives the parent row an immutable
+// terminal-session and QR-generation binding before it reaches the QR screen.
+func (c *Connection) handleRequestEntryTicket(msg *Message) {
+	var payload RequestEntryTicketPayload
+	data, err := json.Marshal(msg.Data)
+	if err != nil || json.Unmarshal(data, &payload) != nil || payload.PrinterID == "" || payload.QRGeneration <= 0 {
+		c.sendRequestError("invalid_request", "printer_id and qr_generation are required", "", payload.RequestID)
+		return
+	}
+	if c.EntrySessions == nil || c.TerminalSessions == nil {
+		c.sendRequestError("entry_unavailable", "entry session service unavailable", payload.PrinterID, payload.RequestID)
+		return
+	}
+	printer, err := c.PrinterRepo.GetPrinterByID(payload.PrinterID)
+	if err != nil || printer == nil || printer.EdgeNodeID != c.NodeID || !printer.Enabled {
+		c.sendRequestError("printer_unavailable", "printer unavailable", payload.PrinterID, payload.RequestID)
+		return
+	}
+	snapshot, err := c.TerminalSessions.Get(c.NodeID)
+	if err != nil || snapshot == nil || snapshot.TerminalSessionID == "" || snapshot.QRGeneration != payload.QRGeneration {
+		c.sendRequestError("terminal_session_invalid", "terminal session changed", payload.PrinterID, payload.RequestID)
+		return
+	}
+	raw, hash, err := entryCredential()
+	if err != nil {
+		c.sendRequestError("entry_unavailable", "unable to create entry ticket", payload.PrinterID, payload.RequestID)
+		return
+	}
+	expiresAt := time.Now().Add(5 * time.Minute)
+	if _, err = c.EntrySessions.Issue(c.NodeID, payload.PrinterID, snapshot.TerminalSessionID, payload.QRGeneration, hash, expiresAt); err != nil {
+		c.sendRequestError("entry_unavailable", "unable to persist entry ticket", payload.PrinterID, payload.RequestID)
+		return
+	}
+	response, err := json.Marshal(map[string]interface{}{"type": CmdTypeEntryTicket, "data": EntryTicketResponsePayload{RequestID: payload.RequestID, Ticket: raw, EntryURL: "/entry#t=" + raw, ExpiresAt: expiresAt}})
+	if err == nil {
+		_ = c.enqueue(response)
 	}
 }
 
