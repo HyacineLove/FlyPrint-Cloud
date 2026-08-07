@@ -73,17 +73,56 @@ func (f *fakeIdentityBoundary) opsRequest(method, path, token string, body []byt
 
 func testPortalConfig() configuration {
 	return configuration{
-		Code:                   "official",
-		DisplayName:            "FlyPrint",
-		IdentityBrowserBaseURL: "https://identity.example.test",
-		IdentityCallbackURL:    "https://portal.example.test/auth/callback",
-		PRPBaseURL:             "https://prp.example.test",
-		PRPAPIBaseURL:          "https://prp-internal.example.test",
-		UploadEnabled:          true,
-		LoginStateTTL:          5 * time.Minute,
-		ClaimTTL:               5 * time.Minute,
-		OpsSessionTTL:          time.Hour,
-		UserSessionTTL:         time.Hour,
+		Code:                     "official",
+		DisplayName:              "FlyPrint",
+		IdentityAuthorizationURL: "https://identity.example.test/oauth2.0/authorize",
+		IdentityTokenURL:         "https://identity.example.test/oauth2.0/accessToken",
+		IdentityUserinfoURL:      "https://identity.example.test/oauth2.0/profile",
+		IdentityClientID:         "site-portal-client",
+		IdentityClientSecret:     "identity-client-secret-123456789012",
+		IdentityScope:            "ECNU-Basic",
+		IdentityProfileFormat:    "legacy",
+		IdentityCallbackURL:      "https://portal.example.test/auth/callback",
+		IdentityOpsAPIBaseURL:    "https://identity.example.test",
+		PRPBaseURL:               "https://prp.example.test",
+		PRPAPIBaseURL:            "https://prp-internal.example.test",
+		UploadEnabled:            true,
+		LoginStateTTL:            5 * time.Minute,
+		ClaimTTL:                 5 * time.Minute,
+		OpsSessionTTL:            time.Hour,
+		UserSessionTTL:           time.Hour,
+	}
+}
+
+func TestMinimalPortalReturnsNoContentAfterLogin(t *testing.T) {
+	now := time.Now().UTC()
+	config := testPortalConfig()
+	config.UploadEnabled = false
+	config.IdentityCallbackURL = "https://uat.example.test/fly-print-site-portal/auth/callback"
+	server := newPortalServer(config, &fakeCloudBoundary{completeUser: "cloud-user-1"}, &fakeIdentityBoundary{
+		result: identityResult{
+			ExternalUserID: "external-user-1", DisplayName: "张老师",
+			AccessToken: "private-prp-token", ExpiresAt: now.Add(5 * time.Minute),
+		},
+	})
+	state := server.loginStates.create(loginState{
+		TerminalTicket: "raw-ticket",
+		Context: terminalContext{
+			SitePortalCode: "official", NodeID: "edge-1", TerminalSessionID: "session-1",
+			ExpiresAt: now.Add(5 * time.Minute),
+		},
+		ExpiresAt: now.Add(5 * time.Minute),
+	})
+
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet, "/auth/callback?state="+state+"&code=identity-code", nil,
+	))
+	if recorder.Code != http.StatusNoContent || recorder.Body.Len() != 0 {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
+	}
+	if len(recorder.Result().Cookies()) != 0 {
+		t.Fatalf("minimal portal unexpectedly set browser cookies: %v", recorder.Result().Cookies())
 	}
 }
 
@@ -179,6 +218,40 @@ func TestEntryRejectsTerminalContextThatCloudDoesNotValidate(t *testing.T) {
 	}
 	if server.loginStates.count() != 0 {
 		t.Fatalf("invalid entry created login state: count=%d", server.loginStates.count())
+	}
+}
+
+func TestEntryRedirectsDirectlyToIdentityProvider(t *testing.T) {
+	cloud := &fakeCloudBoundary{context: terminalContext{
+		SitePortalCode: "official", NodeID: "edge-1", TerminalSessionID: "session-1",
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}}
+	server := newPortalServer(testPortalConfig(), cloud, &fakeIdentityBoundary{})
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet, "/entry?terminal_ticket=valid-ticket", nil,
+	))
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body)
+	}
+	location := recorder.Header().Get("Location")
+	for _, expected := range []string{
+		"https://identity.example.test/oauth2.0/authorize",
+		"response_type=code",
+		"client_id=site-portal-client",
+		"redirect_uri=https%3A%2F%2Fportal.example.test%2Fauth%2Fcallback",
+		"scope=ECNU-Basic",
+	} {
+		if !strings.Contains(location, expected) {
+			t.Fatalf("location=%q missing %q", location, expected)
+		}
+	}
+	if strings.Contains(recorder.Body.String(), "用户登录") {
+		t.Fatalf("entry rendered an intermediate login page: %s", recorder.Body)
+	}
+	if server.loginStates.count() != 1 {
+		t.Fatalf("login state count=%d", server.loginStates.count())
 	}
 }
 

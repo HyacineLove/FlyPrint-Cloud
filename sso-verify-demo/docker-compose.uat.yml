@@ -1,0 +1,16 @@
+services:
+  fly-print-site-portal:
+    image: flyprint-site-portal:uat
+    container_name: fly-print-site-portal
+    restart: unless-stopped
+    env_file:
+      - ./.env.uat
+    environment:
+      SSO_VERIFY_LISTEN_ADDR: 0.0.0.0:8090
+    ports:
+      - "127.0.0.1:18090:8090"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

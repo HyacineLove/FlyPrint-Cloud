@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 )
@@ -20,30 +21,36 @@ const (
 )
 
 type configuration struct {
-	Code                   string
-	DisplayName            string
-	CloudAPIBaseURL        string
-	CloudOAuthClientID     string
-	CloudOAuthClientSecret string
-	IdentityBrowserBaseURL string
-	IdentityAPIBaseURL     string
-	IdentityClientSecret   string
-	IdentityCallbackURL    string
-	PRPBaseURL             string
-	PRPAPIBaseURL          string
-	UploadEnabled          bool
-	LoginStateTTL          time.Duration
-	ClaimTTL               time.Duration
-	OpsSessionTTL          time.Duration
-	UserSessionTTL         time.Duration
-	CookieSecure           bool
+	Code                     string
+	DisplayName              string
+	CloudAPIBaseURL          string
+	CloudOAuthClientID       string
+	CloudOAuthClientSecret   string
+	IdentityAuthorizationURL string
+	IdentityTokenURL         string
+	IdentityUserinfoURL      string
+	IdentityClientID         string
+	IdentityClientSecret     string
+	IdentityScope            string
+	IdentityProfileFormat    string
+	IdentityCallbackURL      string
+	IdentityOpsAPIBaseURL    string
+	PRPBaseURL               string
+	PRPAPIBaseURL            string
+	UploadEnabled            bool
+	LoginStateTTL            time.Duration
+	ClaimTTL                 time.Duration
+	OpsSessionTTL            time.Duration
+	UserSessionTTL           time.Duration
+	CookieSecure             bool
 }
 
 func (c configuration) validate() error {
 	required := []string{
 		c.Code, c.DisplayName, c.CloudAPIBaseURL, c.CloudOAuthClientID, c.CloudOAuthClientSecret,
-		c.IdentityBrowserBaseURL, c.IdentityAPIBaseURL, c.IdentityClientSecret,
-		c.IdentityCallbackURL, c.PRPBaseURL,
+		c.IdentityAuthorizationURL, c.IdentityTokenURL, c.IdentityUserinfoURL,
+		c.IdentityClientID, c.IdentityClientSecret, c.IdentityScope, c.IdentityCallbackURL,
+		c.PRPBaseURL,
 	}
 	for _, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -51,16 +58,21 @@ func (c configuration) validate() error {
 		}
 	}
 	for _, raw := range []string{
-		c.CloudAPIBaseURL, c.IdentityBrowserBaseURL, c.IdentityAPIBaseURL,
-		c.IdentityCallbackURL, c.PRPBaseURL,
+		c.CloudAPIBaseURL, c.IdentityAuthorizationURL, c.IdentityTokenURL,
+		c.IdentityUserinfoURL, c.IdentityCallbackURL, c.PRPBaseURL,
 	} {
 		parsed, err := url.Parse(raw)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 			return fmt.Errorf("Site Portal URL configuration must use absolute HTTP(S) URLs")
 		}
 	}
-	if len(c.CloudOAuthClientID) < 3 || len(c.CloudOAuthClientSecret) < 32 || len(c.IdentityClientSecret) < 32 {
+	if len(c.CloudOAuthClientID) < 3 || len(c.CloudOAuthClientSecret) < 32 ||
+		len(c.IdentityClientID) < 3 || len(c.IdentityClientSecret) < 32 {
 		return fmt.Errorf("Site Portal service credentials must be at least 32 characters")
+	}
+	profileFormat := strings.ToLower(strings.TrimSpace(c.IdentityProfileFormat))
+	if profileFormat != "legacy" && profileFormat != "oidc" {
+		return fmt.Errorf("Site Portal OAuth userinfo profile format must be legacy or oidc")
 	}
 	if c.LoginStateTTL <= 0 || c.ClaimTTL <= 0 || c.OpsSessionTTL <= 0 || c.UserSessionTTL <= 0 {
 		return fmt.Errorf("Site Portal TTL values must be positive")
@@ -69,6 +81,12 @@ func (c configuration) validate() error {
 		parsed, err := url.Parse(c.PRPAPIBaseURL)
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 			return fmt.Errorf("Site Portal PRP API URL must use an absolute HTTP(S) URL")
+		}
+	}
+	if raw := strings.TrimSpace(c.IdentityOpsAPIBaseURL); raw != "" {
+		parsed, err := url.Parse(raw)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return fmt.Errorf("Site Portal identity operator API URL must use an absolute HTTP(S) URL")
 		}
 	}
 	return nil
@@ -104,17 +122,19 @@ func (s *portalServer) Handler() http.Handler {
 	mux.HandleFunc("GET /entry", s.entry)
 	mux.HandleFunc("GET /auth/callback", s.authCallback)
 	mux.HandleFunc("POST /api/claims/redeem", s.redeemClaim)
+	mux.HandleFunc("GET /files", s.filesPage)
 	if s.config.UploadEnabled {
-		mux.HandleFunc("GET /files", s.filesPage)
 		mux.HandleFunc("POST /api/files/upload-context", s.createFileUploadContext)
 	}
-	mux.HandleFunc("GET /ops", s.opsPage)
-	mux.HandleFunc("POST /api/ops/login", s.opsLogin)
-	mux.HandleFunc("POST /api/ops/logout", s.opsLogout)
-	mux.HandleFunc("GET /api/ops/users", s.opsUsers)
-	mux.HandleFunc("POST /api/ops/users", s.opsUsers)
-	mux.HandleFunc("DELETE /api/ops/users/{id}", s.opsDeleteUser)
-	mux.HandleFunc("POST /api/ops/users/{id}/reset-password", s.opsResetPassword)
+	if strings.TrimSpace(s.config.IdentityOpsAPIBaseURL) != "" {
+		mux.HandleFunc("GET /ops", s.opsPage)
+		mux.HandleFunc("POST /api/ops/login", s.opsLogin)
+		mux.HandleFunc("POST /api/ops/logout", s.opsLogout)
+		mux.HandleFunc("GET /api/ops/users", s.opsUsers)
+		mux.HandleFunc("POST /api/ops/users", s.opsUsers)
+		mux.HandleFunc("DELETE /api/ops/users/{id}", s.opsDeleteUser)
+		mux.HandleFunc("POST /api/ops/users/{id}/reset-password", s.opsResetPassword)
+	}
 	return portalSecurityHeaders(mux)
 }
 
@@ -136,21 +156,27 @@ func (s *portalServer) entry(w http.ResponseWriter, r *http.Request) {
 	state := s.loginStates.create(loginState{
 		TerminalTicket: terminalTicket, Context: context, ExpiresAt: expiresAt,
 	})
-	loginURL, _ := url.Parse(strings.TrimRight(s.config.IdentityBrowserBaseURL, "/") + "/login")
+	loginURL, _ := url.Parse(s.config.IdentityAuthorizationURL)
 	query := loginURL.Query()
+	query.Set("response_type", "code")
+	query.Set("client_id", s.config.IdentityClientID)
 	query.Set("redirect_uri", s.config.IdentityCallbackURL)
+	query.Set("scope", s.config.IdentityScope)
 	query.Set("state", state)
 	loginURL.RawQuery = query.Encode()
 
-	body := `<h1>` + template.HTMLEscapeString(s.config.DisplayName) + `</h1><p>登录后即可在当前打印终端继续选择文件。</p><a class="primary" href="` +
-		template.HTMLEscapeString(loginURL.String()) + `">登录</a>`
-	renderPortalPage(w, http.StatusOK, "用户登录", body)
+	// 票据校验成功后直接进入统一身份服务，不在 Site Portal 增加中间登录页。
+	http.Redirect(w, r, loginURL.String(), http.StatusFound)
 }
 
 func (s *portalServer) authCallback(w http.ResponseWriter, r *http.Request) {
 	state, err := s.loginStates.redeem(r.URL.Query().Get("state"), s.now())
 	if err != nil {
 		renderPortalError(w, http.StatusGone, "登录会话已失效", "请返回打印终端重新扫码。")
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("error")) != "" {
+		renderPortalError(w, http.StatusBadGateway, "登录失败", "身份服务未完成授权。")
 		return
 	}
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
@@ -194,6 +220,12 @@ func (s *portalServer) authCallback(w http.ResponseWriter, r *http.Request) {
 		renderPortalError(w, http.StatusBadGateway, "登录结果未送达", "请返回打印终端重新扫码。")
 		return
 	}
+	if !s.config.UploadEnabled {
+		// 当前 Site Portal 只负责完成登录和向 Cloud 发布一次性 Claim，
+		// 不提供浏览器业务页面；Edge 收到 Cloud 通知后继续后续流程。
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	sessionExpiresAt := s.now().Add(s.config.UserSessionTTL)
 	if identity.ExpiresAt.Before(sessionExpiresAt) {
 		sessionExpiresAt = identity.ExpiresAt
@@ -208,7 +240,24 @@ func (s *portalServer) authCallback(w http.ResponseWriter, r *http.Request) {
 		Secure: s.config.CookieSecure, SameSite: http.SameSiteLaxMode,
 		Expires: sessionExpiresAt,
 	})
-	http.Redirect(w, r, "/files", http.StatusSeeOther)
+	http.Redirect(w, r, s.filesPath(), http.StatusSeeOther)
+}
+
+// filesPath preserves the public reverse-proxy prefix when the portal is
+// mounted below a path such as /fly-print-site-portal/.
+func (s *portalServer) filesPath() string {
+	parsed, err := url.Parse(s.config.IdentityCallbackURL)
+	if err == nil {
+		callbackPath := path.Clean(parsed.Path)
+		if strings.HasSuffix(callbackPath, "/auth/callback") {
+			basePath := strings.TrimSuffix(callbackPath, "/auth/callback")
+			if basePath == "" {
+				return "/files"
+			}
+			return basePath + "/files"
+		}
+	}
+	return "/files"
 }
 
 func (s *portalServer) redeemClaim(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +294,16 @@ func (s *portalServer) userSession(r *http.Request) (browserSession, bool) {
 }
 
 func (s *portalServer) filesPage(w http.ResponseWriter, r *http.Request) {
+	if !s.config.UploadEnabled {
+		session, ok := s.userSession(r)
+		if !ok || !session.AccessTokenExpiresAt.After(s.now()) {
+			renderPortalError(w, http.StatusUnauthorized, "登录已失效", "请返回打印终端重新扫码登录。")
+			return
+		}
+		body := `<h1>登录成功</h1><p>Site Portal 已完成登录，当前打印终端可以继续获取文件列表。</p>`
+		renderPortalPage(w, http.StatusOK, "登录成功", body)
+		return
+	}
 	session, ok := s.userSession(r)
 	if !ok || !session.AccessTokenExpiresAt.After(s.now()) {
 		renderPortalError(w, http.StatusUnauthorized, "登录已失效", "请返回打印终端重新扫码登录。")

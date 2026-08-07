@@ -57,15 +57,32 @@ func TestIdentityTokenTravelsFromIdentityThroughPortalClaimWithoutEnteringCloud(
 	defer cloudServer.Close()
 
 	identityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/token" ||
-			r.Header.Get("Authorization") != "Bearer identity-client-secret-123456789012" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+		switch r.URL.Path {
+		case "/oauth2.0/accessToken":
+			if err := r.ParseForm(); err != nil || r.Form.Get("grant_type") != "authorization_code" ||
+				r.Form.Get("client_id") != "identity-client" ||
+				r.Form.Get("client_secret") != "identity-client-secret-123456789012" ||
+				r.Form.Get("redirect_uri") != "https://portal.example.test/auth/callback" ||
+				r.Form.Get("code") != "identity-code" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			writePortalJSON(w, http.StatusOK, map[string]any{
+				"access_token": "sso-access-token", "token_type": "bearer", "expires_in": 300,
+			})
+		case "/oauth2.0/profile":
+			if r.Header.Get("Authorization") != "Bearer sso-access-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			writePortalJSON(w, http.StatusOK, map[string]any{
+				"id": "external-user-1", "active": true, "client_id": "identity-client",
+				"parentIdentityInfo": map[string]string{"code": "JG", "name": "教职工"},
+				"attributes":         map[string]string{"XGH": "external-user-1", "XM": "张老师", "objectId": "object-1"},
+			})
+		default:
+			http.NotFound(w, r)
 		}
-		writePortalJSON(w, http.StatusOK, identityResult{
-			ExternalUserID: "external-user-1", DisplayName: "张老师",
-			AccessToken: "private-prp-token", ExpiresAt: now.Add(5 * time.Minute),
-		})
 	}))
 	defer identityServer.Close()
 
@@ -76,8 +93,12 @@ func TestIdentityTokenTravelsFromIdentityThroughPortalClaimWithoutEnteringCloud(
 		clientID: "site-portal-client", clientSecret: "cloud-portal-secret-12345678901234567890", client: client,
 	}
 	identity := &identityClient{
-		apiBaseURL:   identityServer.URL,
-		clientSecret: "identity-client-secret-123456789012", client: client,
+		tokenURL:     identityServer.URL + "/oauth2.0/accessToken",
+		userinfoURL:  identityServer.URL + "/oauth2.0/profile",
+		clientID:     "identity-client",
+		clientSecret: "identity-client-secret-123456789012",
+		redirectURI:  "https://portal.example.test/auth/callback",
+		client:       client,
 	}
 	portal := newPortalServer(config, cloud, identity)
 
@@ -109,7 +130,7 @@ func TestIdentityTokenTravelsFromIdentityThroughPortalClaimWithoutEnteringCloud(
 	request := httptest.NewRequest(http.MethodPost, "/api/claims/redeem", bytes.NewReader(claimRequest))
 	request.Header.Set("Content-Type", "application/json")
 	portal.Handler().ServeHTTP(redeem, request)
-	if redeem.Code != http.StatusOK || !strings.Contains(redeem.Body.String(), "private-prp-token") {
+	if redeem.Code != http.StatusOK || !strings.Contains(redeem.Body.String(), "sso-access-token") {
 		t.Fatalf("redeem status=%d body=%s", redeem.Code, redeem.Body)
 	}
 }
