@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Layout, Menu, Avatar, Dropdown, Space } from 'antd';
+import { Layout, Menu, Avatar, Dropdown, Space, Typography } from 'antd';
 import { 
   DashboardOutlined, 
   PrinterOutlined, 
@@ -9,7 +9,9 @@ import {
   LogoutOutlined,
   ControlOutlined,
   TeamOutlined,
-  UserOutlined
+  UserOutlined,
+  ApartmentOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 
@@ -32,6 +34,7 @@ import Loading from './components/Loading';
 import { buildAuthUrl, buildAppPath, APP_BASENAME } from './config';
 
 const { Header, Sider, Content } = Layout;
+const { Text, Title } = Typography;
 
 interface User {
   id: string;
@@ -49,6 +52,18 @@ const AdminApp: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const pageTitles: Record<string, string> = {
+    '/': '总仪表盘',
+    '/edge-nodes': 'Edge 节点',
+    '/ops-contacts': '运维人员',
+    '/users': '用户管理',
+    '/printers': '打印机',
+    '/print-jobs': '打印任务',
+    '/business-settings': '业务配置',
+    '/site-portals': 'Site Portal',
+  };
+  const currentPageTitle = pageTitles[location.pathname] || '管理中心';
 
   // 获取当前用户信息
   useEffect(() => {
@@ -102,44 +117,30 @@ const AdminApp: React.FC = () => {
   // 菜单项配置
   const menuItems: MenuProps['items'] = [
     {
-      key: '/',
-      icon: <DashboardOutlined />,
-      label: '总仪表盘',
+      type: 'group',
+      label: '运营',
+      children: [
+        { key: '/', icon: <DashboardOutlined />, label: '总仪表盘' },
+        { key: '/edge-nodes', icon: <CloudServerOutlined />, label: 'Edge 节点' },
+        { key: '/printers', icon: <PrinterOutlined />, label: '打印机' },
+        { key: '/print-jobs', icon: <FileTextOutlined />, label: '打印任务' },
+      ],
     },
     {
-      key: '/edge-nodes',
-      icon: <CloudServerOutlined />,
-      label: '节点信息',
+      type: 'group',
+      label: '账号与入口',
+      children: [
+        { key: '/site-portals', icon: <ApartmentOutlined />, label: 'Site Portal' },
+        { key: '/users', icon: <UserOutlined />, label: '用户管理' },
+        { key: '/ops-contacts', icon: <TeamOutlined />, label: '运维人员' },
+      ],
     },
     {
-      key: '/ops-contacts',
-      icon: <TeamOutlined />,
-      label: '运维人员',
-    },
-    {
-      key: '/users',
-      icon: <UserOutlined />,
-      label: '用户管理',
-    },
-    {
-      key: '/printers',
-      icon: <PrinterOutlined />,
-      label: '打印机信息',
-    },
-    {
-      key: '/print-jobs',
-      icon: <FileTextOutlined />,
-      label: '打印任务',
-    },
-    {
-      key: '/business-settings',
-      icon: <ControlOutlined />,
-      label: '业务配置',
-    },
-    {
-      key: '/site-portals',
-      icon: <CloudServerOutlined />,
-      label: 'Site Portal',
+      type: 'group',
+      label: '系统',
+      children: [
+        { key: '/business-settings', icon: <ControlOutlined />, label: '业务配置' },
+      ],
     },
   ];
 
@@ -148,7 +149,7 @@ const AdminApp: React.FC = () => {
     {
       key: 'logout',
       icon: <LogoutOutlined />,
-      label: '退出登录',
+      label: '退出当前账号',
       onClick: handleLogout,
     },
   ];
@@ -166,8 +167,12 @@ const AdminApp: React.FC = () => {
       <Sider
         className="fp-admin-sider"
         collapsible
+        breakpoint="lg"
+        width={224}
+        collapsedWidth={72}
         collapsed={collapsed}
         onCollapse={setCollapsed}
+        onBreakpoint={broken => setCollapsed(broken)}
         style={{
           position: 'fixed',
           height: '100vh',
@@ -177,7 +182,8 @@ const AdminApp: React.FC = () => {
         }}
       >
         <div className="fp-admin-brand">
-          {collapsed ? 'FP' : '飞印服务管理中心'}
+          <span className="fp-admin-brand-mark">FP</span>
+          {!collapsed && <span className="fp-admin-brand-copy"><strong>飞印 Cloud</strong><small>打印运营控制台</small></span>}
         </div>
         <Menu
           theme="dark"
@@ -188,9 +194,9 @@ const AdminApp: React.FC = () => {
         />
       </Sider>
 
-      <Layout className="fp-admin-main" style={{ marginLeft: collapsed ? 80 : 200, transition: 'margin-left 0.2s' }}>
+      <Layout className="fp-admin-main" style={{ marginLeft: collapsed ? 72 : 224, transition: 'margin-left 0.2s' }}>
         <Header className="fp-admin-header" style={{
-          padding: '0 24px',
+          padding: '0 28px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -198,15 +204,22 @@ const AdminApp: React.FC = () => {
           top: 0,
           zIndex: 1,
         }}>
-          <div />
-          <Space>
-            <span>欢迎, {user?.username}</span>
-            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-              <Avatar style={{ cursor: 'pointer' }}>
+          <div className="fp-header-context">
+            <Text className="fp-header-kicker">Cloud 管理中心</Text>
+            <Title level={5} className="fp-header-title">{currentPageTitle}</Title>
+          </div>
+          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+            <Space className="fp-user-menu" size={10}>
+              <Avatar className="fp-user-avatar">
                 {user?.username?.charAt(0).toUpperCase()}
               </Avatar>
-            </Dropdown>
-          </Space>
+              <span className="fp-user-meta">
+                <strong>{user?.username}</strong>
+                <small>管理员</small>
+              </span>
+              <DownOutlined className="fp-user-chevron" />
+            </Space>
+          </Dropdown>
         </Header>
 
         <Content className="fp-admin-content">
