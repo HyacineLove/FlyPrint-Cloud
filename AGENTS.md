@@ -13,7 +13,7 @@ Go 控制面（Gin + PostgreSQL + WebSocket），独立 git 仓库。
 ## 协议与业务边界
 
 - WebSocket 权威消息定义在 `api/internal/websocket/message.go`；跨仓协议同步 `../../docs/protocol.md` 与 Edge consumer 测试。
-- 外部接入边界只有 Site Portal；旧 Provider/HMAC/回调式第三方接口、`integration-demo` 和 Redis 业务依赖已删除。
+- 外部接入边界只有 Site Portal。`fly-print-site-portal`、`fly-print-site-set`（含 PRP）与身份提供者均为独立部署单元，Cloud 仓库不得再内嵌其源码或测试应用。
 - OAuth 客户端类型只允许 `edge_node`、`site_portal`。Site Portal 使用 client credentials 获取 Bearer token。
 
 ## 数据库

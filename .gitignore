@@ -43,3 +43,9 @@ deploy/release/.env
 deploy/server.env
 deploy/release/CREDENTIALS.txt
 deploy/release/flyprint-images.tar
+
+# 本地离线发布产物与构建日志
+/release/
+/build-cloud-release-*.log
+/build-cloud-release-*.log.err
+/build-cloud-release-*.pid
