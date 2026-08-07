@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"fly-print-cloud/api/internal/models"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -52,5 +54,29 @@ func TestEntryErrorRetryActionIsExplicit(t *testing.T) {
 	renderEntryError(context, http.StatusServiceUnavailable, "暂时不可用", "请稍后重试。", true)
 	if !strings.Contains(recorder.Body.String(), `onclick="location.reload()"`) {
 		t.Fatal("retryable entry error should render a retry action")
+	}
+}
+
+func TestRenderSitePortalSelectionPagePostsSelectedPortal(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	portals := []*models.SitePortal{
+		{Code: "official", DisplayName: "Official Portal", EntryURL: "http://official.test/entry", Enabled: true},
+		{Code: "local-test", DisplayName: "Local Test Portal", EntryURL: "http://local.test/entry", Enabled: true},
+	}
+
+	renderSitePortalSelectionPage(recorder, "ticket-123", portals, "official")
+	body := recorder.Body.String()
+
+	for _, expected := range []string{
+		"Official Portal",
+		"Local Test Portal",
+		"/api/v1/public/terminal-entry/select",
+		"ticket-123",
+		`data-entry="local-test"`,
+		`data-default="true"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("selection page missing %q: %s", expected, body)
+		}
 	}
 }

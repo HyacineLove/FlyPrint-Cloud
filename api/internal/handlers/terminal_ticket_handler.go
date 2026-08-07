@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"fly-print-cloud/api/internal/database"
@@ -40,6 +41,15 @@ func NewTerminalTicketHandler(tickets *database.TerminalTicketRepository, printe
 
 func (h *TerminalTicketHandler) EntryPage(c *gin.Context) {
 	if c.Query("terminal_ticket") != "" {
+		entry, validationErr := h.loadTerminalEntryContext(c.Query("terminal_ticket"))
+		if validationErr != nil {
+			renderEntryError(c, validationErr.status, validationErr.title, validationErr.message, validationErr.retry)
+			return
+		}
+		if len(entry.portals.Portals) > 1 {
+			renderSitePortalSelectionPage(c.Writer, c.Query("terminal_ticket"), entry.portals.Portals, entry.portals.DefaultPortalCode)
+			return
+		}
 		h.directEntryPage(c)
 		return
 	}
@@ -50,37 +60,81 @@ func (h *TerminalTicketHandler) EntryPage(c *gin.Context) {
 	renderEntryError(c, http.StatusBadRequest, "二维码无效", "请返回打印终端刷新二维码后重新扫码。", false)
 }
 
-// directEntryPage routes a ticket using the Site Portal configured for the Edge node.
-func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
-	raw := c.Query("terminal_ticket")
+type terminalEntryContext struct {
+	ticket  *models.TerminalTicket
+	portals *models.EdgeSitePortalConfig
+}
+
+type terminalEntryValidationError struct {
+	status  int
+	title   string
+	message string
+	retry   bool
+}
+
+func (e *terminalEntryValidationError) Error() string {
+	return e.title
+}
+
+func (h *TerminalTicketHandler) loadTerminalEntryContext(raw string) (*terminalEntryContext, *terminalEntryValidationError) {
 	ticket, err := h.tickets.GetValidByHash(ticketHash(raw), time.Now())
 	if err != nil {
-		renderEntryError(c, http.StatusGone, "terminal ticket expired", "Please return to the terminal and scan a new QR code.", false)
-		return
+		return nil, &terminalEntryValidationError{http.StatusGone, "terminal ticket expired", "Please return to the terminal and scan a new QR code.", false}
 	}
 	if h.sessions != nil {
 		matched, matchErr := h.sessions.Matches(ticket.NodeID, ticket.TerminalSessionID, ticket.TicketHash)
 		if matchErr != nil || !matched {
-			renderEntryError(c, http.StatusConflict, "terminal session expired", "The terminal session has changed. Please scan a new QR code.", false)
-			return
+			return nil, &terminalEntryValidationError{http.StatusConflict, "terminal session expired", "The terminal session has changed. Please scan a new QR code.", false}
 		}
 	}
 	node, err := h.edgeNodes.GetEdgeNodeByID(ticket.NodeID)
 	if err != nil || node == nil || !node.Enabled {
-		renderEntryError(c, http.StatusForbidden, "terminal unavailable", "This terminal is disabled or offline.", false)
-		return
+		return nil, &terminalEntryValidationError{http.StatusForbidden, "terminal unavailable", "This terminal is disabled or offline.", false}
 	}
-	portal, err := h.sitePortals.GetDefaultForNode(ticket.NodeID)
-	if err != nil || portal == nil {
-		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal Site Portal configuration is not available.", true)
-		return
+	portals, err := h.sitePortals.GetEdgeSitePortalConfig(ticket.NodeID)
+	if err != nil || portals == nil {
+		return nil, &terminalEntryValidationError{http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal Site Portal configuration is not available.", true}
+	}
+	activePortals := make([]*models.SitePortal, 0, len(portals.Portals))
+	for _, portal := range portals.Portals {
+		if portal != nil && portal.Enabled {
+			activePortals = append(activePortals, portal)
+		}
+	}
+	portals.Portals = activePortals
+	if len(portals.Portals) == 0 || strings.TrimSpace(portals.DefaultPortalCode) == "" {
+		return nil, &terminalEntryValidationError{http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal Site Portal configuration is not available.", true}
 	}
 	printer, err := h.printers.GetPrinterByID(ticket.PrinterID)
 	if err != nil || printer == nil || printer.EdgeNodeID != ticket.NodeID || !printer.Enabled {
-		renderEntryError(c, http.StatusForbidden, "printer unavailable", "The configured printer is unavailable.", false)
+		return nil, &terminalEntryValidationError{http.StatusForbidden, "printer unavailable", "The configured printer is unavailable.", false}
+	}
+	return &terminalEntryContext{ticket: ticket, portals: portals}, nil
+}
+
+func findSitePortal(config *models.EdgeSitePortalConfig, code string) *models.SitePortal {
+	for _, portal := range config.Portals {
+		if portal != nil && portal.Code == code {
+			return portal
+		}
+	}
+	return nil
+}
+
+// directEntryPage routes a ticket using the Site Portal configured for the Edge node.
+func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
+	raw := c.Query("terminal_ticket")
+	entry, validationErr := h.loadTerminalEntryContext(raw)
+	if validationErr != nil {
+		renderEntryError(c, validationErr.status, validationErr.title, validationErr.message, validationErr.retry)
 		return
 	}
-	selected, err := h.tickets.Select(ticket.TicketHash, portal.Code, time.Now())
+	portal := findSitePortal(entry.portals, entry.portals.DefaultPortalCode)
+	if portal == nil {
+		renderEntryError(c, http.StatusServiceUnavailable, "terminal entry unavailable", "The terminal Site Portal configuration is not available.", true)
+		return
+	}
+	selected, err := h.tickets.Select(entry.ticket.TicketHash, portal.Code, time.Now())
 	if err != nil {
 		renderEntryError(c, http.StatusConflict, "terminal ticket expired", "The ticket is expired or has already been used.", false)
 		return
@@ -95,6 +149,32 @@ func (h *TerminalTicketHandler) directEntryPage(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Redirect(http.StatusFound, redirect)
+}
+
+func renderSitePortalSelectionPage(w http.ResponseWriter, rawTicket string, portals []*models.SitePortal, defaultCode string) {
+	var options strings.Builder
+	for _, portal := range portals {
+		if portal == nil || !portal.Enabled {
+			continue
+		}
+		defaultAttribute := ""
+		if portal.Code == defaultCode {
+			defaultAttribute = ` data-default="true"`
+		}
+		fmt.Fprintf(&options, `<button type="button" class="portal-option" data-entry="%s"%s><span>%s</span>%s</button>`,
+			html.EscapeString(portal.Code), defaultAttribute, html.EscapeString(portal.DisplayName),
+			func() string {
+				if portal.Code == defaultCode {
+					return `<small>默认入口</small>`
+				}
+				return ""
+			}())
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>选择登录入口</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#f5f7fb;color:#172033;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;padding:24px}.card{width:min(440px,100%%);background:#fff;border:1px solid #e4e8f0;border-radius:20px;padding:28px;box-shadow:0 12px 36px #1d355712}.card h1{margin:0 0 8px;font-size:24px}.card p{margin:0 0 22px;color:#667085}.portal-option{width:100%%;display:flex;align-items:center;justify-content:space-between;gap:16px;margin:10px 0;padding:16px 18px;border:1px solid #d8deea;border-radius:14px;background:#fff;color:#172033;font-size:16px;text-align:left;cursor:pointer}.portal-option:hover,.portal-option:focus{border-color:#356ae6;outline:3px solid #356ae626}.portal-option[data-default="true"]{border-color:#356ae6;background:#f3f7ff}.portal-option small{color:#356ae6}.error{min-height:1.4em;margin-top:14px;color:#ba1a1a}</style></head><body><main class="card" id="site-portal-selection" data-terminal-ticket="%s"><h1>选择登录入口</h1><p>请选择本次打印使用的 Site Portal。</p><section aria-label="Site Portal 列表">%s</section><div class="error" role="alert" aria-live="polite"></div></main><script>
+const root=document.getElementById("site-portal-selection");const error=root.querySelector(".error");root.querySelectorAll(".portal-option").forEach((button)=>button.addEventListener("click",async()=>{root.querySelectorAll("button").forEach((item)=>item.disabled=true);error.textContent="正在打开登录入口…";try{const response=await fetch("/api/v1/public/terminal-entry/select",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({terminal_ticket:root.dataset.terminalTicket,entry:button.dataset.entry})});const payload=await response.json().catch(()=>({}));if(!response.ok||typeof payload.redirect_url!=="string"||!payload.redirect_url){throw new Error("selection failed")}window.location.assign(payload.redirect_url)}catch(_){root.querySelectorAll("button").forEach((item)=>item.disabled=false);error.textContent="登录入口暂时不可用，请重新扫码。"}}));</script></body></html>`, html.EscapeString(rawTicket), options.String())
 }
 
 func buildSitePortalEntryURL(entryURL, terminalTicket string) (string, error) {
@@ -113,11 +193,11 @@ type selectTerminalEntryRequest struct {
 	Entry          string `json:"entry" binding:"required"`
 }
 
-// SelectEntry keeps the public entry selector limited to official and the
-// configured Site Portal boundary.
+// SelectEntry validates and locks one assigned Site Portal for the terminal
+// ticket before returning its configured entry URL.
 func (h *TerminalTicketHandler) SelectEntry(c *gin.Context) {
 	var req selectTerminalEntryRequest
-	if err := c.ShouldBindJSON(&req); err != nil || (req.Entry != "official" && !sitePortalCodePattern.MatchString(req.Entry)) {
+	if err := c.ShouldBindJSON(&req); err != nil || !sitePortalCodePattern.MatchString(req.Entry) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_terminal_entry"})
 		return
 	}
@@ -164,16 +244,6 @@ func (h *TerminalTicketHandler) SelectEntry(c *gin.Context) {
 	}
 	if h.uploadSessions != nil {
 		_ = h.uploadSessions.DeleteOpenForTicket(ticket.TicketHash)
-	}
-	if req.Entry == "official" {
-		token, expiresAt, err := h.tokens.GenerateUploadToken(ticket.NodeID, ticket.PrinterID)
-		if err != nil || h.uploadSessions == nil || h.uploadSessions.Create(token, ticket.TicketHash, ticket.NodeID, ticket.PrinterID, ticket.TerminalSessionID, expiresAt) != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "official_upload_unavailable"})
-			return
-		}
-		query := url.Values{"token": {token}, "node_id": {ticket.NodeID}, "printer_id": {ticket.PrinterID}}
-		c.JSON(http.StatusOK, gin.H{"redirect_url": "/upload?" + query.Encode()})
-		return
 	}
 	redirect, err := buildSitePortalEntryURL(portal.EntryURL, req.TerminalTicket)
 	if err != nil {
