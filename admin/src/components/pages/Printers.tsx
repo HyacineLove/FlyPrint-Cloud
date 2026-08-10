@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Select, Space, Switch, Table, Tag, message } from 'antd';
+import { Button, Card, Descriptions, Drawer, Input, Modal, Select, Space, Switch, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, FileTextOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EyeOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { buildApiUrl, buildAuthUrl } from '../../config';
-import { TwoLineLink } from '../DisplayValue';
+import { EntityCell, FullIdentifier, TwoLineLink } from '../DisplayValue';
 import { RelationStack } from '../RelationLinks';
 
 interface Node { id: string; name: string; alias?: string; connection_status: string; }
@@ -61,6 +61,7 @@ const Printers: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>();
+  const [detailPrinter, setDetailPrinter] = useState<Printer | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -101,16 +102,14 @@ const Printers: React.FC = () => {
   const remove = (printer: Printer) => Modal.confirm({ title: '删除打印机？', content: `${printer.display_name || printer.name}\n${printer.id}`, okText: '删除', okType: 'danger', cancelText: '取消', onOk: async () => { try { await request(`/admin/printers/${printer.id}`, { method: 'DELETE' }); message.success('打印机已删除'); load(); } catch { message.error('删除失败'); } } });
 
   const columns: ColumnsType<Printer> = [
-    { title: '打印机 ID', dataIndex: 'id', width: 280, sorter: (a, b) => a.id.localeCompare(b.id), render: (id: string) => <span style={{ wordBreak: 'break-all' }}>{id}</span> },
     {
-      title: '打印机名称',
-      width: 220,
+      title: '打印机',
+      width: 330,
       sorter: (a, b) => (a.display_name || a.name || '').localeCompare(b.display_name || b.name || ''),
       render: (_, printer) => editing === printer.id
         ? <Space.Compact className="inline-name-editor"><Input autoFocus value={name} onChange={event => setName(event.target.value)} onPressEnter={() => saveName(printer)} placeholder="留空以清除别名" /><Button type="primary" onClick={() => saveName(printer)}>保存</Button></Space.Compact>
-        : <span style={{ cursor: 'pointer' }} onClick={() => { setEditing(printer.id); setName(printer.display_name || printer.name || ''); }}><div>{printer.display_name || printer.name}</div>{printer.display_name && <div style={{ color: '#8c8c8c', fontSize: 12 }}>（{printer.name}）</div>}</span>,
+        : <span style={{ cursor: 'pointer', display: 'block' }} onClick={() => { setEditing(printer.id); setName(printer.display_name || printer.name || ''); }}><EntityCell primary={printer.display_name || printer.name || '未命名打印机'} secondary={printer.model || undefined} id={printer.id} /></span>,
     },
-    { title: '打印机型号', dataIndex: 'model', sorter: (a, b) => (a.model || '').localeCompare(b.model || ''), render: value => value || '-' },
     {
       title: '所属节点',
       width: 250,
@@ -150,7 +149,7 @@ const Printers: React.FC = () => {
       render: (_, printer) => stateTag(effectivePrinterStatus(printer.printer_status, nodes[printer.edge_node_id]?.connection_status)),
     },
     { title: '打印机启用状态', width: 110, render: (_, printer) => <Switch checked={printer.enabled} onChange={enabled => update(printer, { enabled })} /> },
-    { title: '', width: 70, render: (_, printer) => <Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(printer)} /> },
+    { title: '操作', width: 130, render: (_, printer) => <Space size="small"><Button type="link" icon={<EyeOutlined />} onClick={() => setDetailPrinter(printer)}>详情</Button><Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(printer)} /></Space> },
   ];
 
   const hasUrlFilter = !!(edgeNodeFilter || printerFilter);
@@ -159,7 +158,7 @@ const Printers: React.FC = () => {
     <div>
       <div style={{ marginBottom: 16 }}>
         <Space wrap>
-          <Input.Search allowClear placeholder="搜索 ID / 名称 / 型号" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+          <Input.Search allowClear placeholder="搜索名称、型号或 ID" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
           <Select allowClear placeholder="打印机状态" style={{ width: 140 }} value={statusFilter} onChange={setStatusFilter}
             options={[
               { value: 'idle', label: '就绪' }, { value: 'printing', label: '打印中' }, { value: 'error', label: '异常' },
@@ -175,7 +174,19 @@ const Printers: React.FC = () => {
           ) : null}
         </Space>
       </div>
-      <Card><Table rowKey="id" loading={loading} dataSource={visiblePrinters} columns={columns} scroll={{ x: 1300 }} pagination={{ pageSize: 20, showSizeChanger: false }} /></Card>
+      <Card><Table rowKey="id" loading={loading} dataSource={visiblePrinters} columns={columns} scroll={{ x: 1080 }} pagination={{ pageSize: 20, showSizeChanger: false }} /></Card>
+      <Drawer title="打印机详情" open={!!detailPrinter} onClose={() => setDetailPrinter(null)} width={440}>
+        {detailPrinter ? <Descriptions column={1} size="small" bordered>
+          <Descriptions.Item label="打印机名称">{detailPrinter.display_name || detailPrinter.name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="设备型号">{detailPrinter.model || '-'}</Descriptions.Item>
+          <Descriptions.Item label="当前状态">{stateTag(effectivePrinterStatus(detailPrinter.printer_status, nodes[detailPrinter.edge_node_id]?.connection_status))}</Descriptions.Item>
+          <Descriptions.Item label="启用状态">{detailPrinter.enabled ? '启用' : '停用'}</Descriptions.Item>
+          <Descriptions.Item label="所属节点">{nodes[detailPrinter.edge_node_id]?.alias || nodes[detailPrinter.edge_node_id]?.name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="任务数">{detailPrinter.job_count ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="打印机 ID"><FullIdentifier value={detailPrinter.id} /></Descriptions.Item>
+          <Descriptions.Item label="节点 ID"><FullIdentifier value={detailPrinter.edge_node_id} /></Descriptions.Item>
+        </Descriptions> : null}
+      </Drawer>
     </div>
   );
 };

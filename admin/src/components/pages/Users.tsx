@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, message } from 'antd';
-import { EditOutlined, KeyOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, message } from 'antd';
+import { EditOutlined, EyeOutlined, KeyOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import type { FilterValue, SorterResult } from 'antd/es/table/interface';
 import { Link, useSearchParams } from 'react-router-dom';
 import { buildApiUrl } from '../../config';
 import { apiService } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
+import { EntityCell, FullIdentifier } from '../DisplayValue';
 
 interface ManagedUser {
   id: string;
@@ -47,6 +48,7 @@ const Users: React.FC = () => {
   const [quotaVisible, setQuotaVisible] = useState(false);
   const [savingEnabled, setSavingEnabled] = useState<string>();
   const [deleting, setDeleting] = useState<string>();
+  const [detailUser, setDetailUser] = useState<ManagedUser | null>(null);
   const [editingUsernameId, setEditingUsernameId] = useState<string>();
   const [usernameDraft, setUsernameDraft] = useState('');
   const usernameEditorRef = useRef<HTMLDivElement>(null);
@@ -226,16 +228,16 @@ const Users: React.FC = () => {
 
   const columns: ColumnsType<ManagedUser> = [
     {
-      title: '邮箱', dataIndex: 'email', width: 260, sorter: true,
-      render: (email: string) => <Link to={`/print-jobs?user_email=${encodeURIComponent(email)}`}>{email}</Link>,
-    },
-    {
-      title: '用户名', dataIndex: 'username', width: 180, sorter: true,
-      render: (username: string, user) => editingUsernameId === user.id ? (
-        <div className="inline-username-editor" ref={usernameEditorRef}>
-          <Input autoFocus value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} onPressEnter={() => void saveUsername(user)} onKeyDown={(event) => { if (event.key === 'Escape') setEditingUsernameId(undefined); }} />
-        </div>
-      ) : <Button type="text" onClick={() => startUsernameEdit(user)}>{username || '-'}</Button>,
+      title: '用户', dataIndex: 'email', width: 360, sorter: true,
+      render: (email: string, user) => <EntityCell
+        primary={<Link to={`/print-jobs?user_email=${encodeURIComponent(email)}`}>{email}</Link>}
+        secondary={editingUsernameId === user.id ? (
+          <div className="inline-username-editor" ref={usernameEditorRef}>
+            <Input autoFocus value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} onPressEnter={() => void saveUsername(user)} onKeyDown={(event) => { if (event.key === 'Escape') setEditingUsernameId(undefined); }} />
+          </div>
+        ) : <Button type="text" onClick={() => startUsernameEdit(user)}>{user.username || '-'}</Button>}
+        id={user.id}
+      />,
     },
     { title: '角色', dataIndex: 'role', sorter: true, render: (value: string) => roleOptions.find((item) => item.value === value)?.label || value },
     {
@@ -248,9 +250,10 @@ const Users: React.FC = () => {
       render: (value: number) => `${value ?? 0} 点`,
     },
     {
-      title: '操作', width: 360,
+      title: '操作', width: 420,
       render: (_, user) => (
         <Space>
+          <Button icon={<EyeOutlined />} onClick={() => setDetailUser(user)}>详情</Button>
           <Button icon={<EditOutlined />} onClick={() => openEdit(user)}>编辑</Button>
           <Button icon={<KeyOutlined />} onClick={() => { setPasswordUser(user); passwordForm.resetFields(); setPasswordVisible(true); }}>改密码</Button>
           <Button onClick={() => {
@@ -276,6 +279,18 @@ const Users: React.FC = () => {
         <Select allowClear value={status} placeholder="状态" options={[{ value: 'active', label: '启用' }, { value: 'inactive', label: '停用' }]} onChange={setStatus} style={{ width: 120 }} />
       </Space>
       <Table rowKey="id" loading={loading} dataSource={users} columns={columns} onChange={handleTableChange} pagination={{ current: page, total, pageSize, showSizeChanger: true, onChange: (nextPage, nextPageSize) => { setPageSize(nextPageSize); if (token) void load(token, nextPage); } }} scroll={{ x: 1250 }} />
+
+      <Drawer title="用户详情" open={!!detailUser} onClose={() => setDetailUser(null)} width={440}>
+        {detailUser ? <Descriptions column={1} size="small" bordered>
+          <Descriptions.Item label="邮箱"><Link to={`/print-jobs?user_email=${encodeURIComponent(detailUser.email)}`}>{detailUser.email}</Link></Descriptions.Item>
+          <Descriptions.Item label="用户名">{detailUser.username || '-'}</Descriptions.Item>
+          <Descriptions.Item label="角色">{roleOptions.find((item) => item.value === detailUser.role)?.label || detailUser.role}</Descriptions.Item>
+          <Descriptions.Item label="状态">{detailUser.status === 'active' ? '启用' : '停用'}</Descriptions.Item>
+          <Descriptions.Item label="最后登录">{formatDate(detailUser.last_login)}</Descriptions.Item>
+          <Descriptions.Item label="打印额度">{`${detailUser.print_quota_balance ?? 0} 点`}</Descriptions.Item>
+          <Descriptions.Item label="用户 ID"><FullIdentifier value={detailUser.id} /></Descriptions.Item>
+        </Descriptions> : null}
+      </Drawer>
 
       <Modal open={formVisible} title={editing ? '编辑用户' : '新建用户'} onCancel={() => setFormVisible(false)} onOk={() => form.submit()} destroyOnClose okText="保存" cancelText="取消">
         <Form form={form} layout="vertical" onFinish={save}>

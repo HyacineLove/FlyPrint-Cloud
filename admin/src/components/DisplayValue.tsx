@@ -1,26 +1,61 @@
 import React from 'react';
+import { Tooltip, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 
 const TIME_ZONE = 'Asia/Shanghai';
 
-export const TwoLineValue: React.FC<{ id?: string; name?: string; highlightId?: boolean }> = ({ id, name, highlightId }) => {
-  if (!id) return <>-</>;
+export const compactIdentifier = (value?: string) => {
+  if (!value) return '-';
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 8)}…${value.slice(-6)}`;
+};
+
+export const CompactIdentifier: React.FC<{ value?: string; className?: string }> = ({ value, className }) => {
+  if (!value) return <>-</>;
   return (
-    <span style={{ display: 'inline-block', maxWidth: '100%' }}>
-      <div style={{ wordBreak: 'break-all', color: highlightId ? '#1677ff' : undefined }}>{id}</div>
-      <div style={{ color: '#8c8c8c', fontSize: 12, marginTop: 2, wordBreak: 'break-all' }}>{name || '-'}</div>
+    <Tooltip title={value}>
+      <Typography.Text
+        className={className || 'fp-compact-id'}
+        copyable={{ text: value, tooltips: ['复制完整标识', '已复制'] }}
+      >
+        {compactIdentifier(value)}
+      </Typography.Text>
+    </Tooltip>
+  );
+};
+
+export const FullIdentifier: React.FC<{ value?: string }> = ({ value }) => {
+  if (!value) return <>-</>;
+  return <Typography.Text className="fp-full-id" copyable={{ text: value }}>{value}</Typography.Text>;
+};
+
+export const EntityCell: React.FC<{
+  primary?: React.ReactNode;
+  secondary?: React.ReactNode;
+  id?: string;
+  showId?: boolean;
+  linkTo?: string;
+}> = ({ primary, secondary, id, showId = false, linkTo }) => {
+  const main = primary || (id ? compactIdentifier(id) : '-');
+  return (
+    <span className="fp-entity-cell">
+      <span className="fp-entity-primary">
+        {linkTo ? <Link to={linkTo}>{main}</Link> : main}
+      </span>
+      {secondary ? <span className="fp-entity-secondary">{secondary}</span> : null}
+      {showId && id && primary ? <CompactIdentifier value={id} /> : null}
     </span>
   );
 };
 
-/** Whole ID+name block is one jump target; ID is highlighted. */
+export const TwoLineValue: React.FC<{ id?: string; name?: string }> = ({ id, name }) => {
+  return <EntityCell primary={name || (!id ? '-' : undefined)} id={id} />;
+};
+
+/** Whole name block is one jump target; an unnamed resource falls back to a compact identifier. */
 export const TwoLineLink: React.FC<{ to: string; id?: string; name?: string }> = ({ to, id, name }) => {
   if (!id) return <TwoLineValue id={id} name={name} />;
-  return (
-    <Link to={to} style={{ color: 'inherit', display: 'inline-block', maxWidth: '100%' }}>
-      <TwoLineValue id={id} name={name} highlightId />
-    </Link>
-  );
+  return <EntityCell primary={name || compactIdentifier(id)} id={name ? id : undefined} linkTo={to} />;
 };
 
 export const DateTimeValue: React.FC<{ value?: string | Date }> = ({ value }) => {

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Popconfirm, Space, Switch, Table, Typography, message } from 'antd';
+import { Button, Card, Descriptions, Drawer, Form, Input, Modal, Popconfirm, Space, Switch, Table, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { EditOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
+import { EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import { buildApiUrl, buildAuthUrl } from '../../config';
+import { EntityCell, FullIdentifier } from '../DisplayValue';
 
 interface SitePortal {
   code: string; display_name: string; entry_url: string; claim_base_url: string;
@@ -27,6 +28,7 @@ const SitePortals: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingPortal, setEditingPortal] = useState<SitePortal | null>(null);
   const [credential, setCredential] = useState<{ client_id: string; client_secret: string } | null>(null);
+  const [detailPortal, setDetailPortal] = useState<SitePortal | null>(null);
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -69,18 +71,26 @@ const SitePortals: React.FC = () => {
   };
 
   const columns: ColumnsType<SitePortal> = [
-    { title: '编码', dataIndex: 'code', width: 150 },
-    { title: '显示名称', dataIndex: 'display_name', width: 180 },
-    { title: '入口地址', dataIndex: 'entry_url', ellipsis: true },
-    { title: 'Claim 地址', dataIndex: 'claim_base_url', ellipsis: true },
-    { title: 'OAuth Client ID', dataIndex: 'oauth_client_id', width: 200, render: (value) => value || '-' },
+    { title: '入口', width: 280, render: (_, portal) => <EntityCell primary={portal.display_name} secondary={portal.code} /> },
     { title: '关联 Edge', dataIndex: 'edge_node_count', width: 100, render: (value) => value ?? 0 },
     { title: '启用', width: 90, render: (_, portal) => <Switch checked={portal.enabled} onChange={(checked) => void toggle(portal, checked)} /> },
-    { title: '操作', width: 300, render: (_, portal) => <Space size="small"><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(portal)}>编辑</Button><Button type="link" icon={<SyncOutlined />} onClick={() => void rotate(portal)}>轮换凭证</Button><Popconfirm title="确定删除此 Site Portal？" description="已有关联身份或 Edge 入口配置时无法删除。" onConfirm={() => void remove(portal)} okText="删除" cancelText="取消"><Button type="link" danger>删除</Button></Popconfirm></Space> },
+    { title: '操作', width: 340, render: (_, portal) => <Space size="small"><Button type="link" icon={<EyeOutlined />} onClick={() => setDetailPortal(portal)}>详情</Button><Button type="link" icon={<EditOutlined />} onClick={() => openEdit(portal)}>编辑</Button><Button type="link" icon={<SyncOutlined />} onClick={() => void rotate(portal)}>轮换凭证</Button><Popconfirm title="确定删除此 Site Portal？" description="已有关联身份或 Edge 入口配置时无法删除。" onConfirm={() => void remove(portal)} okText="删除" cancelText="取消"><Button type="link" danger>删除</Button></Popconfirm></Space> },
   ];
 
   return <Card title="Site Portal 管理" extra={<Space><Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button><Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新增 Site Portal</Button></Space>}>
-    <Table rowKey="code" loading={loading} dataSource={portals} columns={columns} pagination={false} scroll={{ x: 1250 }} />
+    <Table rowKey="code" loading={loading} dataSource={portals} columns={columns} pagination={false} scroll={{ x: 820 }} />
+    <Drawer title="Site Portal 详情" open={!!detailPortal} onClose={() => setDetailPortal(null)} width={520}>
+      {detailPortal ? <Descriptions column={1} size="small" bordered>
+        <Descriptions.Item label="显示名称">{detailPortal.display_name}</Descriptions.Item>
+        <Descriptions.Item label="编码">{detailPortal.code}</Descriptions.Item>
+        <Descriptions.Item label="状态">{detailPortal.enabled ? '启用' : '停用'}</Descriptions.Item>
+        <Descriptions.Item label="关联 Edge">{detailPortal.edge_node_count ?? 0}</Descriptions.Item>
+        <Descriptions.Item label="入口地址">{detailPortal.entry_url || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Claim 地址">{detailPortal.claim_base_url || '-'}</Descriptions.Item>
+        <Descriptions.Item label="OAuth Client ID"><FullIdentifier value={detailPortal.oauth_client_id} /></Descriptions.Item>
+        <Descriptions.Item label="OAuth Client 状态">{detailPortal.oauth_client_enabled === false ? '停用' : '启用'}</Descriptions.Item>
+      </Descriptions> : null}
+    </Drawer>
     <Modal open={formOpen} title={editingPortal ? '编辑 Site Portal' : '新增 Site Portal'} okText={editingPortal ? '保存' : '创建并生成凭证'} cancelText="取消" onCancel={() => { setFormOpen(false); setEditingPortal(null); form.resetFields(); }} onOk={() => form.submit()} destroyOnClose>
       <Form form={form} layout="vertical" onFinish={save}>
         <Form.Item name="code" label="编码" rules={[{ required: true }]}><Input placeholder="official" disabled={!!editingPortal} /></Form.Item>

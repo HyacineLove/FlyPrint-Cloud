@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Checkbox, Input, Modal, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Checkbox, Descriptions, Drawer, Input, Modal, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, FileTextOutlined, PlusOutlined, PrinterOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EyeOutlined, FileTextOutlined, PlusOutlined, PrinterOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { buildApiUrl, buildAuthUrl } from '../../config';
-import { DateTimeValue } from '../DisplayValue';
+import { DateTimeValue, EntityCell, FullIdentifier } from '../DisplayValue';
 import { RelationStack } from '../RelationLinks';
 
 interface EdgeNode {
@@ -59,6 +59,7 @@ const EdgeNodes: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [connectionFilter, setConnectionFilter] = useState<string | undefined>();
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>();
+  const [detailNode, setDetailNode] = useState<EdgeNode | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -146,14 +147,13 @@ const EdgeNodes: React.FC = () => {
   });
 
   const columns: ColumnsType<EdgeNode> = [
-    { title: '节点 ID', dataIndex: 'id', width: 280, sorter: (a, b) => a.id.localeCompare(b.id), render: (id: string) => <span style={{ wordBreak: 'break-all' }}>{id}</span> },
     {
-      title: '节点名称',
-      width: 220,
+      title: '节点',
+      width: 300,
       sorter: (a, b) => (a.alias || a.name || '').localeCompare(b.alias || b.name || ''),
       render: (_, node) => editing === node.id
         ? <Space.Compact className="inline-name-editor"><Input autoFocus value={alias} onChange={event => setAlias(event.target.value)} onPressEnter={() => saveAlias(node)} placeholder="留空以清除别名" /><Button type="primary" onClick={() => saveAlias(node)}>保存</Button></Space.Compact>
-        : <span onClick={() => { setEditing(node.id); setAlias(node.alias || node.name || ''); }} style={{ cursor: 'pointer' }}><div>{node.alias || node.name || '待激活终端'}</div>{node.alias && <div style={{ color: '#8c8c8c', fontSize: 12 }}>（{node.name || '待上报'}）</div>}</span>,
+        : <span onClick={() => { setEditing(node.id); setAlias(node.alias || node.name || ''); }} style={{ cursor: 'pointer', display: 'block' }}><EntityCell primary={node.alias || node.name || '待激活终端'} secondary={node.alias ? `设备名称：${node.name || '待上报'}` : undefined} id={node.id} /></span>,
     },
     { title: '节点位置', dataIndex: 'location', sorter: (a, b) => (a.location || '').localeCompare(b.location || ''), render: value => value || '-' },
     {
@@ -188,13 +188,13 @@ const EdgeNodes: React.FC = () => {
       ),
     },
     { title: '节点启用状态', width: 105, render: (_, node) => <Switch checked={node.enabled} disabled={node.registration_state === 'pending_activation'} onChange={value => toggle(node, value)} /> },
-    { title: '', width: 70, render: (_, node) => <Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(node)} /> },
+    { title: '操作', width: 170, render: (_, node) => <Space size="small"><Button type="link" icon={<EyeOutlined />} onClick={() => setDetailNode(node)}>详情</Button><Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(node)} /></Space> },
   ];
 
   return <div>
     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
       <Space wrap>
-        <Input.Search allowClear placeholder="搜索 ID / 名称 / 位置" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+        <Input.Search allowClear placeholder="搜索名称、位置或 ID" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} />
         <Select allowClear placeholder="连接状态" style={{ width: 140 }} value={connectionFilter} onChange={setConnectionFilter}
           options={[{ value: 'online', label: '在线' }, { value: 'unstable', label: '连接不稳定' }, { value: 'offline', label: '离线' }]} />
         <Select allowClear placeholder="启用状态" style={{ width: 120 }} value={enabledFilter} onChange={setEnabledFilter}
@@ -208,7 +208,20 @@ const EdgeNodes: React.FC = () => {
       </Space>
       <Button type="primary" icon={<PlusOutlined />} onClick={createActivation}>创建待激活终端</Button>
     </div>
-    <Card><Table rowKey="id" loading={loading} dataSource={visibleNodes} columns={columns} scroll={{ x: 1560 }} pagination={{ pageSize: 20, showSizeChanger: false }} /></Card>
+    <Card><Table rowKey="id" loading={loading} dataSource={visibleNodes} columns={columns} scroll={{ x: 1320 }} pagination={{ pageSize: 20, showSizeChanger: false }} /></Card>
+    <Drawer title="节点详情" open={!!detailNode} onClose={() => setDetailNode(null)} width={460}>
+      {detailNode ? <Descriptions column={1} size="small" bordered>
+        <Descriptions.Item label="节点名称">{detailNode.alias || detailNode.name || '待激活终端'}</Descriptions.Item>
+        <Descriptions.Item label="节点位置">{detailNode.location || '-'}</Descriptions.Item>
+        <Descriptions.Item label="连接状态">{statusTag(detailNode.connection_status)}</Descriptions.Item>
+        <Descriptions.Item label="健康状态"><Tooltip title={detailNode.health_message}>{healthTag(detailNode.health_status)}</Tooltip></Descriptions.Item>
+        <Descriptions.Item label="注册状态">{detailNode.registration_state || '-'}</Descriptions.Item>
+        <Descriptions.Item label="最后心跳"><DateTimeValue value={detailNode.last_heartbeat} /></Descriptions.Item>
+        <Descriptions.Item label="节点版本">{detailNode.version || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Site Portal">{portalConfigs[detailNode.id]?.portals?.length ?? 0} 个入口{portalConfigs[detailNode.id]?.default_code ? `，默认：${portalConfigs[detailNode.id].default_code}` : ''}</Descriptions.Item>
+        <Descriptions.Item label="节点 ID"><FullIdentifier value={detailNode.id} /></Descriptions.Item>
+      </Descriptions> : null}
+    </Drawer>
     <Modal open={!!activation} footer={<Button type="primary" onClick={() => setActivation(null)}>我已保存</Button>} closable={false} title="一次性激活码">
       <Typography.Paragraph>请在 Edge 的初始激活界面填写 Cloud URL 和以下激活码。激活码仅显示一次，10 分钟后失效。</Typography.Paragraph>
       <Typography.Title level={3} copyable={{ text: activation?.code }}>{activation?.code}</Typography.Title>

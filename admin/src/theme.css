@@ -262,6 +262,55 @@ a {
   font-weight: 650;
 }
 
+.fp-entity-cell {
+  min-width: 0;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  line-height: 1.35;
+}
+
+.fp-entity-primary {
+  overflow: hidden;
+  color: var(--fp-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-entity-primary a {
+  color: var(--fp-brand-700);
+}
+
+.fp-entity-secondary {
+  overflow: hidden;
+  color: var(--fp-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-compact-id {
+  max-width: 100%;
+  color: #8995a6 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.fp-compact-id .ant-typography-copy {
+  color: #a4afbd;
+  font-size: 11px;
+}
+
+.fp-full-id {
+  display: inline-block;
+  max-width: 100%;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
 .ant-table-wrapper {
   overflow-x: auto;
 }

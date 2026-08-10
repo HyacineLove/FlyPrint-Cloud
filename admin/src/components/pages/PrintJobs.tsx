@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Card, Input, Select, Space, Table, Tag, message } from 'antd';
+import { Button, Card, Descriptions, Drawer, Input, Select, Space, Table, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { EyeOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { buildApiUrl, buildAuthUrl } from '../../config';
-import { DateTimeValue, TwoLineLink } from '../DisplayValue';
+import { DateTimeValue, EntityCell, FullIdentifier } from '../DisplayValue';
 
 interface PrintJob {
   id: string; name: string; initiator_name?: string; initiator_code?: string;
@@ -52,6 +53,7 @@ const PrintJobs: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
+  const [detailJob, setDetailJob] = useState<PrintJob | null>(null);
 
   const load = useCallback(async (nextPage = page) => {
     try {
@@ -87,73 +89,51 @@ const PrintJobs: React.FC = () => {
 
   const columns: ColumnsType<PrintJob> = [
     {
-      title: '任务 ID',
-      width: 260,
+      title: '任务',
+      width: 240,
       sorter: (a, b) => a.id.localeCompare(b.id),
-      render: (_, job) => (
-        <span>
-          <div style={{ wordBreak: 'break-all' }}>{job.id}</div>
-          <div style={{ color: '#8c8c8c', fontSize: 12 }}>{job.name || '-'}</div>
-        </span>
-      ),
+      render: (_, job) => <EntityCell primary={job.name || '未命名文件'} id={job.id} />,
     },
     {
       title: '打印人',
       width: 220,
       sorter: (a, b) => (a.user_email || '').localeCompare(b.user_email || ''),
       render: (_, job) => job.user_email ? (
-        <span>
-          <Link to={`/users?email=${encodeURIComponent(job.user_email || '')}`}>{job.user_email}</Link>
-          <div style={{ color: '#8c8c8c', fontSize: 12 }}>{job.user_name || '-'}</div>
-        </span>
+        <EntityCell
+          primary={<Link to={`/users?email=${encodeURIComponent(job.user_email || '')}`}>{job.user_email}</Link>}
+          secondary={job.user_name ? <span style={{ color: '#8c8c8c', fontSize: 12 }}>{job.user_name}</span> : undefined}
+        />
       ) : <div style={{ color: '#8c8c8c' }}>{job.user_name || '-'}</div>,
     },
     {
       title: '任务来源',
-      width: 160,
+      width: 170,
       sorter: (a, b) => (a.initiator_code || a.initiator_name || '').localeCompare(b.initiator_code || b.initiator_name || ''),
-      render: (_, job) => {
-        if (job.site_portal_code) {
-          return <span>
-            <div>{job.initiator_name || job.site_portal_code}</div>
-            <div style={{ color: '#8c8c8c', fontSize: 12 }}>{job.site_portal_code}</div>
-          </span>;
-        }
-        if (job.initiator_code) {
-          return <TwoLineLink to={`/site-portals?code=${encodeURIComponent(job.initiator_code)}`} id={job.initiator_code} name={job.initiator_name || job.initiator_code} />;
-        }
-        return job.initiator_name || '主系统';
-      },
+      render: (_, job) => <EntityCell
+        primary={job.initiator_name || job.site_portal_code || job.initiator_code || '主系统'}
+        secondary={job.site_portal_code || job.initiator_code || undefined}
+      />,
     },
     {
-      title: '节点 ID',
+      title: '设备',
       width: 220,
       sorter: (a, b) => (a.edge_node_id || '').localeCompare(b.edge_node_id || ''),
-      render: (_, job) => job.edge_node_id
-        ? <TwoLineLink to={`/edge-nodes?node_id=${encodeURIComponent(job.edge_node_id)}`} id={job.edge_node_id} name={job.node_name} />
-        : <>-</>,
+      render: (_, job) => <EntityCell
+        primary={job.printer_name || '未关联打印机'}
+        secondary={job.node_name ? `节点：${job.node_name}` : job.edge_node_id ? '节点未命名' : undefined}
+      />,
     },
     {
-      title: '打印机 ID',
-      width: 220,
-      sorter: (a, b) => (a.printer_id || '').localeCompare(b.printer_id || ''),
-      render: (_, job) => job.printer_id
-        ? <TwoLineLink to={`/printers?printer_id=${encodeURIComponent(job.printer_id)}`} id={job.printer_id} name={job.printer_name} />
-        : <>-</>,
-    },
-    {
-      title: '页数 / 份数',
-      width: 120,
-      render: (_, job) => `${job.page_count ?? 0} 页 × ${job.copies ?? 0} 份`,
-    },
-    {
-      title: '打印参数',
-      width: 180,
+      title: '打印内容',
+      width: 190,
       render: (_, job) => {
         const color = job.color_mode === 'color' ? '彩色' : '黑白';
         const duplex = job.duplex_mode === 'longedge' ? '双面长边'
           : job.duplex_mode === 'shortedge' ? '双面短边' : '单面';
-        return `${job.paper_size || '-'} / ${color} / ${duplex}`;
+        return <EntityCell
+          primary={`${job.page_count ?? 0} 页 × ${job.copies ?? 0} 份`}
+          secondary={`${job.paper_size || '-'} / ${color} / ${duplex}`}
+        />;
       },
     },
     {
@@ -173,6 +153,7 @@ const PrintJobs: React.FC = () => {
       onFilter: (value, record) => record.status === value,
       render: (_, job) => result(job),
     },
+    { title: '操作', width: 80, render: (_, job) => <Button type="link" icon={<EyeOutlined />} onClick={() => setDetailJob(job)}>详情</Button> },
   ];
 
   const hasUrlFilter = !!(edgeNodeFilter || printerFilter || initiatorFilter || userEmailFilter);
@@ -181,7 +162,7 @@ const PrintJobs: React.FC = () => {
     <div>
       <div style={{ marginBottom: 16 }}>
         <Space wrap>
-          <Input.Search allowClear placeholder="搜索当前页 ID / 名称" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} onSearch={() => load(1)} />
+          <Input.Search allowClear placeholder="搜索名称、用户或 ID" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} onSearch={() => load(1)} />
           <Select allowClear placeholder="任务状态" style={{ width: 140 }} value={statusFilter} onChange={(value) => setStatusFilter(value)}
             options={[
               { value: 'completed', label: '完成' }, { value: 'failed', label: '失败' }, { value: 'processing', label: '打印中' },
@@ -204,7 +185,26 @@ const PrintJobs: React.FC = () => {
           ) : null}
         </Space>
       </div>
-      <Card><Table rowKey="id" loading={loading} dataSource={jobs} columns={columns} scroll={{ x: 1900 }} pagination={{ current: page, total, pageSize: 20, showSizeChanger: false, onChange: next => load(next) }} /></Card>
+      <Card><Table rowKey="id" loading={loading} dataSource={jobs} columns={columns} scroll={{ x: 1450 }} pagination={{ current: page, total, pageSize: 20, showSizeChanger: false, onChange: next => load(next) }} /></Card>
+      <Drawer title="打印任务详情" open={!!detailJob} onClose={() => setDetailJob(null)} width={480}>
+        {detailJob ? <Descriptions column={1} size="small" bordered>
+          <Descriptions.Item label="文件名">{detailJob.name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="任务结果">{result(detailJob)}</Descriptions.Item>
+          <Descriptions.Item label="打印人">{detailJob.user_name || detailJob.user_email || '-'}</Descriptions.Item>
+          <Descriptions.Item label="任务来源">{detailJob.initiator_name || detailJob.site_portal_code || detailJob.initiator_code || '主系统'}</Descriptions.Item>
+          <Descriptions.Item label="节点">{detailJob.node_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="打印机">{detailJob.printer_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="打印内容">{`${detailJob.page_count ?? 0} 页 × ${detailJob.copies ?? 0} 份`}</Descriptions.Item>
+          <Descriptions.Item label="打印参数">{`${detailJob.paper_size || '-'} / ${detailJob.color_mode === 'color' ? '彩色' : '黑白'} / ${detailJob.duplex_mode === 'longedge' ? '双面长边' : detailJob.duplex_mode === 'shortedge' ? '双面短边' : '单面'}`}</Descriptions.Item>
+          <Descriptions.Item label="额度">{`${detailJob.quota_reserved ?? 0} / ${detailJob.quota_consumed ?? '-'} 点`}</Descriptions.Item>
+          <Descriptions.Item label="创建时间"><DateTimeValue value={detailJob.created_at} /></Descriptions.Item>
+          <Descriptions.Item label="终态时间"><DateTimeValue value={detailJob.end_time} /></Descriptions.Item>
+          <Descriptions.Item label="任务 ID"><FullIdentifier value={detailJob.id} /></Descriptions.Item>
+          <Descriptions.Item label="用户邮箱"><FullIdentifier value={detailJob.user_email} /></Descriptions.Item>
+          <Descriptions.Item label="节点 ID"><FullIdentifier value={detailJob.edge_node_id} /></Descriptions.Item>
+          <Descriptions.Item label="打印机 ID"><FullIdentifier value={detailJob.printer_id} /></Descriptions.Item>
+        </Descriptions> : null}
+      </Drawer>
     </div>
   );
 };
