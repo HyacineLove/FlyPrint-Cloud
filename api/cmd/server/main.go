@@ -27,9 +27,6 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"github.com/ulule/limiter/v3"
-	mgin "github.com/ulule/limiter/v3/drivers/middleware/gin"
-	"github.com/ulule/limiter/v3/drivers/store/memory"
 	"go.uber.org/zap"
 
 	_ "fly-print-cloud/api/docs" // Swagger 生成的文档
@@ -255,14 +252,6 @@ func main() {
 	}
 
 	// Rate Limiting (10 req/s)
-	rate := limiter.Rate{
-		Period: 1 * time.Second,
-		Limit:  10,
-	}
-	store := memory.NewStore()
-	instance := limiter.New(store, rate)
-	r.Use(mgin.NewMiddleware(instance))
-
 	// 添加中间件
 	r.Use(middleware.LoggerMiddleware())
 	r.Use(gin.Recovery())
@@ -367,8 +356,8 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 	// OAuth2 认证路由
 	authGroup := r.Group("/auth")
 	{
-		authGroup.GET("/mode", oauth2Handler.Mode)    // 返回当前认证模式（公开）
-		authGroup.POST("/token", oauth2Handler.Token) // Token 端点（builtin 模式）
+		authGroup.GET("/mode", oauth2Handler.Mode)         // 返回当前认证模式（公开）
+		authGroup.POST("/token", oauth2Handler.Token)      // Token 端点（builtin 模式）
 		authGroup.GET("/userinfo", oauth2Handler.UserInfo) // UserInfo 端点
 		authGroup.GET("/login", oauth2Handler.Login)
 		authGroup.GET("/callback", oauth2Handler.Callback)
