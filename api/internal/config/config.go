@@ -470,6 +470,7 @@ func setDefaults() {
 	// Server 默认值
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8080)
+	viper.SetDefault("server.public_base_url", "")
 	viper.SetDefault("server.allowed_origins", []string{
 		"https://admin.fly-print.local",
 		"https://kiosk.fly-print.local",

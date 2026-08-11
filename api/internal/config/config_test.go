@@ -3,7 +3,23 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
+
+func TestLoadBindsPublicBaseURLEnvironment(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	t.Setenv("FLY_PRINT_SERVER_PUBLIC_BASE_URL", "http://203.0.113.10:80")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Server.PublicBaseURL != "http://203.0.113.10:80" {
+		t.Fatalf("PublicBaseURL = %q, want environment value", cfg.Server.PublicBaseURL)
+	}
+}
 
 func TestValidateStorageProvider(t *testing.T) {
 	t.Parallel()

@@ -25,7 +25,7 @@ func TestPortalSessionReadyDoesNotSerializePrivateCredential(t *testing.T) {
 	if !strings.Contains(text, `"claim_code":"claim-1"`) {
 		t.Fatalf("missing claim code: %s", text)
 	}
-	for _, forbidden := range []string{"access_token", "prp_credential", "cookie", "password"} {
+	for _, forbidden := range []string{"access_token", "prp_credential", "prp_base_url", "providers", "provider_id", "cookie", "password"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("private field %q leaked: %s", forbidden, text)
 		}

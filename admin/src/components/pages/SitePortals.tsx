@@ -86,7 +86,7 @@ const SitePortals: React.FC = () => {
         <Descriptions.Item label="状态">{detailPortal.enabled ? '启用' : '停用'}</Descriptions.Item>
         <Descriptions.Item label="关联 Edge">{detailPortal.edge_node_count ?? 0}</Descriptions.Item>
         <Descriptions.Item label="入口地址">{detailPortal.entry_url || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Claim 地址">{detailPortal.claim_base_url || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Site Portal Claim API 地址（非 PRP）">{detailPortal.claim_base_url || '-'}</Descriptions.Item>
         <Descriptions.Item label="OAuth Client ID"><FullIdentifier value={detailPortal.oauth_client_id} /></Descriptions.Item>
         <Descriptions.Item label="OAuth Client 状态">{detailPortal.oauth_client_enabled === false ? '停用' : '启用'}</Descriptions.Item>
       </Descriptions> : null}
@@ -96,7 +96,7 @@ const SitePortals: React.FC = () => {
         <Form.Item name="code" label="编码" rules={[{ required: true }]}><Input placeholder="official" disabled={!!editingPortal} /></Form.Item>
         <Form.Item name="display_name" label="显示名称" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="entry_url" label="入口地址" rules={[{ required: true, type: 'url' }]}><Input placeholder="http://portal.example/entry" /></Form.Item>
-        <Form.Item name="claim_base_url" label="Claim 地址" rules={[{ required: true, type: 'url' }]}><Input placeholder="http://portal.example" /></Form.Item>
+        <Form.Item name="claim_base_url" label="Site Portal Claim API 地址（非 PRP）" rules={[{ required: true, type: 'url' }]}><Input placeholder="http://portal.example" /></Form.Item>
       </Form>
     </Modal>
     <Modal open={!!credential} title="请立即保存 Site Portal 凭证" footer={<Button type="primary" onClick={() => setCredential(null)}>我已保存</Button>} onCancel={() => setCredential(null)}>
