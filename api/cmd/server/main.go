@@ -278,6 +278,8 @@ func main() {
 		Addr:    serverAddr,
 		Handler: r,
 	}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	// 启动服务器（在goroutine中）
 	go func() {
@@ -286,10 +288,20 @@ func main() {
 			logger.Fatal("Server failed to start", zap.Error(err))
 		}
 	}()
+	if deadline, err := cfg.Security.InsecureHTTPDeadline(); err != nil {
+		logger.Fatal("Invalid temporary HTTP deadline", zap.Error(err))
+	} else if !deadline.IsZero() {
+		logger.Error("TEMPORARY INSECURE HTTP MODE ENABLED: credentials and tickets traverse plaintext HTTP", zap.Time("expires_at", deadline))
+		go func() {
+			timer := time.NewTimer(time.Until(deadline))
+			defer timer.Stop()
+			<-timer.C
+			logger.Error("Temporary insecure HTTP deadline reached; shutting down Cloud API")
+			quit <- syscall.SIGTERM
+		}()
+	}
 
 	// 等待中断信号以优雅关机
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info("Shutting down server...")
@@ -357,7 +369,6 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 	{
 		authGroup.GET("/mode", oauth2Handler.Mode)    // 返回当前认证模式（公开）
 		authGroup.POST("/token", oauth2Handler.Token) // Token 端点（builtin 模式）
-		authGroup.POST("/register", oauth2Handler.Register)
 		authGroup.GET("/userinfo", oauth2Handler.UserInfo) // UserInfo 端点
 		authGroup.GET("/login", oauth2Handler.Login)
 		authGroup.GET("/callback", oauth2Handler.Callback)

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestValidateStorageProvider(t *testing.T) {
 	t.Parallel()
@@ -77,6 +80,77 @@ func TestValidateSitePortalBootstrapAcceptsExplicitConfiguration(t *testing.T) {
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateTemporaryInsecureHTTPRequiresShortLivedIPOrigin(t *testing.T) {
+	cfg := validConfigForTest()
+	cfg.App.Debug = false
+	cfg.Security.EntryCookieSecure = false
+	cfg.Security.InsecureHTTPMode = true
+	cfg.Security.InsecureHTTPUntil = time.Now().Add(6 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	cfg.Server.PublicBaseURL = "http://203.0.113.10"
+	cfg.Admin.ConsoleURL = "http://203.0.113.10"
+	cfg.Server.AllowedOrigins = []string{"http://203.0.113.10"}
+	cfg.Server.TrustedProxyCIDRs = []string{"172.18.0.0/16"}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil for bounded temporary HTTP mode", err)
+	}
+}
+
+func TestValidateTemporaryInsecureHTTPRejectsHostnameAndLongWindow(t *testing.T) {
+	cfg := validConfigForTest()
+	cfg.App.Debug = false
+	cfg.Security.EntryCookieSecure = false
+	cfg.Security.InsecureHTTPMode = true
+	cfg.Security.InsecureHTTPUntil = time.Now().Add(8 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	cfg.Server.PublicBaseURL = "http://cloud.example.test"
+	cfg.Admin.ConsoleURL = "http://cloud.example.test"
+	cfg.Server.AllowedOrigins = []string{"http://cloud.example.test"}
+	cfg.Server.TrustedProxyCIDRs = []string{"172.18.0.0/16"}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want temporary HTTP hostname/window rejection")
+	}
+}
+
+func TestValidateProductionRequiresSpecificTrustedProxyCIDR(t *testing.T) {
+	cfg := validConfigForTest()
+	cfg.App.Debug = false
+	cfg.Security.EntryCookieSecure = true
+	cfg.Server.TrustedProxyCIDRs = []string{"0.0.0.0/0"}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unsafe trusted proxy rejection")
+	}
+
+	cfg.Server.TrustedProxyCIDRs = []string{"172.18.0.0/16"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want specific proxy CIDR acceptance", err)
+	}
+}
+
+func TestValidateKeycloakRedirectRequiresPublicCallbackOrigin(t *testing.T) {
+	cfg := validConfigForTest()
+	cfg.App.Debug = false
+	cfg.Security.EntryCookieSecure = true
+	cfg.Server.PublicBaseURL = "https://print.example.test"
+	cfg.Server.TrustedProxyCIDRs = []string{"172.18.0.0/16"}
+	cfg.OAuth2 = OAuth2Config{
+		Mode: "keycloak", JWTSigningSecret: "12345678901234567890123456789012",
+		ClientID: "cloud", ClientSecret: "secret", AuthURL: "https://id.example.test/auth",
+		TokenURL: "https://id.example.test/token", UserInfoURL: "https://id.example.test/userinfo",
+		JWKSURL: "https://id.example.test/jwks", Audience: "cloud", RedirectURI: "http://localhost:8012/auth/callback",
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want localhost callback rejection")
+	}
+
+	cfg.OAuth2.RedirectURI = "https://print.example.test/auth/callback"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want public HTTPS callback acceptance", err)
 	}
 }
 

@@ -2,9 +2,11 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -106,6 +108,8 @@ type SecurityConfig struct {
 	UploadTokenTTL                 int    `mapstructure:"upload_token_ttl"`
 	DownloadTokenTTL               int    `mapstructure:"download_token_ttl"`
 	EntryCookieSecure              bool   `mapstructure:"entry_cookie_secure"`
+	InsecureHTTPMode               bool   `mapstructure:"insecure_http_mode"`
+	InsecureHTTPUntil              string `mapstructure:"insecure_http_until"`
 }
 
 // SitePortalBootstrapConfig installs the first Site Portal and its dedicated
@@ -229,10 +233,16 @@ func (c *Config) Validate() error {
 		if c.OAuth2.Audience == "" {
 			return fmt.Errorf("oauth2.audience is required for keycloak mode")
 		}
+		if err := c.validateExternalOAuthRedirect(); err != nil {
+			return err
+		}
 	}
 
 	// 警告：生产环境不应使用默认密钥
 	if !c.App.Debug {
+		if err := validateTrustedProxyCIDRs(c.Server.TrustedProxyCIDRs); err != nil {
+			return err
+		}
 		if c.OAuth2.JWTSigningSecret == "fly-print-jwt-secret-dev-only" {
 			return fmt.Errorf("SECURITY WARNING: jwt_signing_secret must be changed in production")
 		}
@@ -286,7 +296,11 @@ func (c *Config) Validate() error {
 	if c.Security.DownloadTokenTTL <= 0 {
 		return fmt.Errorf("security.download_token_ttl must be greater than 0")
 	}
-	if !c.App.Debug && !c.Security.EntryCookieSecure {
+	if c.Security.InsecureHTTPMode {
+		if err := c.validateTemporaryInsecureHTTP(); err != nil {
+			return err
+		}
+	} else if !c.App.Debug && !c.Security.EntryCookieSecure {
 		return fmt.Errorf("security.entry_cookie_secure must be true outside development/test")
 	}
 
@@ -295,6 +309,112 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func validateTrustedProxyCIDRs(cidrs []string) error {
+	if len(cidrs) == 0 {
+		return fmt.Errorf("server.trusted_proxy_cidrs is required outside development/test")
+	}
+	for _, raw := range cidrs {
+		ip, network, err := net.ParseCIDR(raw)
+		if err != nil || ip == nil || network == nil {
+			return fmt.Errorf("server.trusted_proxy_cidrs contains invalid CIDR %q", raw)
+		}
+		ones, bits := network.Mask.Size()
+		if ones == 0 && (bits == 32 || bits == 128) {
+			return fmt.Errorf("server.trusted_proxy_cidrs must not trust every address")
+		}
+	}
+	return nil
+}
+
+func (c *Config) validateExternalOAuthRedirect() error {
+	redirect, err := url.Parse(c.OAuth2.RedirectURI)
+	if err != nil || redirect == nil || redirect.User != nil || redirect.RawQuery != "" || redirect.Fragment != "" {
+		return fmt.Errorf("oauth2.redirect_uri must be an origin-local callback URL")
+	}
+	if redirect.Path != "/auth/callback" {
+		return fmt.Errorf("oauth2.redirect_uri must use /auth/callback")
+	}
+
+	if c.Security.InsecureHTTPMode {
+		redirectOrigin, err := insecureHTTPOrigin(redirect.Scheme + "://" + redirect.Host)
+		if err != nil {
+			return fmt.Errorf("oauth2.redirect_uri: %w", err)
+		}
+		publicOrigin, err := insecureHTTPOrigin(c.Server.PublicBaseURL)
+		if err != nil || redirectOrigin != publicOrigin {
+			return fmt.Errorf("oauth2.redirect_uri must use the temporary public IP HTTP origin")
+		}
+		return nil
+	}
+
+	publicURL, err := url.Parse(c.Server.PublicBaseURL)
+	if err != nil || publicURL == nil || publicURL.Scheme != "https" || publicURL.Host == "" {
+		return fmt.Errorf("server.public_base_url must be an HTTPS origin when keycloak mode is enabled")
+	}
+	if redirect.Scheme != "https" || redirect.Host != publicURL.Host {
+		return fmt.Errorf("oauth2.redirect_uri must use the same HTTPS origin as server.public_base_url")
+	}
+	return nil
+}
+
+// InsecureHTTPDeadline returns the hard stop used only by the explicitly
+// configured, short-lived IP-address rollout mode.
+func (c SecurityConfig) InsecureHTTPDeadline() (time.Time, error) {
+	if !c.InsecureHTTPMode {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, c.InsecureHTTPUntil)
+}
+
+func (c *Config) validateTemporaryInsecureHTTP() error {
+	if c.Security.EntryCookieSecure {
+		return fmt.Errorf("security.entry_cookie_secure must be false when insecure_http_mode is enabled")
+	}
+	deadline, err := c.Security.InsecureHTTPDeadline()
+	if err != nil {
+		return fmt.Errorf("security.insecure_http_until must be RFC3339: %w", err)
+	}
+	now := time.Now()
+	if !deadline.After(now) {
+		return fmt.Errorf("security.insecure_http_until must be in the future")
+	}
+	if deadline.Sub(now) > 7*24*time.Hour {
+		return fmt.Errorf("security.insecure_http_until must be within 7 days")
+	}
+	publicOrigin, err := insecureHTTPOrigin(c.Server.PublicBaseURL)
+	if err != nil {
+		return fmt.Errorf("server.public_base_url: %w", err)
+	}
+	adminOrigin, err := insecureHTTPOrigin(c.Admin.ConsoleURL)
+	if err != nil {
+		return fmt.Errorf("admin.console_url: %w", err)
+	}
+	if adminOrigin != publicOrigin {
+		return fmt.Errorf("admin.console_url must use the same IP HTTP origin as server.public_base_url")
+	}
+	if len(c.Server.AllowedOrigins) != 1 || c.Server.AllowedOrigins[0] != publicOrigin {
+		return fmt.Errorf("server.allowed_origins must contain exactly the temporary IP HTTP origin")
+	}
+	return nil
+}
+
+func insecureHTTPOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		return "", fmt.Errorf("must be a valid HTTP URL")
+	}
+	if u.Scheme != "http" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("must be an origin-only http:// IP URL")
+	}
+	if net.ParseIP(u.Hostname()) == nil {
+		return "", fmt.Errorf("must use a literal IP address, not a hostname")
+	}
+	if port := u.Port(); port != "" && port != "80" {
+		return "", fmt.Errorf("must use port 80 when a port is specified")
+	}
+	return "http://" + u.Host, nil
 }
 
 func (c SitePortalBootstrapConfig) Validate() error {
@@ -397,6 +517,8 @@ func setDefaults() {
 	viper.SetDefault("security.upload_token_ttl", 180)   // 3分钟
 	viper.SetDefault("security.download_token_ttl", 180) // 3分钟
 	viper.SetDefault("security.entry_cookie_secure", true)
+	viper.SetDefault("security.insecure_http_mode", false)
+	viper.SetDefault("security.insecure_http_until", "")
 	viper.SetDefault("site_portal_bootstrap.code", "")
 	viper.SetDefault("site_portal_bootstrap.display_name", "")
 	viper.SetDefault("site_portal_bootstrap.entry_url", "")

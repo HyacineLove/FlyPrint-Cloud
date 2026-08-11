@@ -30,7 +30,7 @@ ENV PUBLIC_URL=$PUBLIC_URL
 RUN npm run build
 
 # 运行阶段 - 复制文件到volume
-FROM ${DOCKERHUB_MIRROR}/library/alpine:latest
+FROM ${DOCKERHUB_MIRROR}/library/alpine:3.21
 
 # 复制构建产物
 COPY --from=builder /app/build /app/dist

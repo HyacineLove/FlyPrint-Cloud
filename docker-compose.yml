@@ -1,17 +1,17 @@
 services:
   postgres:
-    image: ${COMPOSE_LIBRARY_MIRROR:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io}/library/postgres:15
+    image: postgres:15.13
     container_name: fly-print-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-fly_print_cloud}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-your-secure-password-here}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - fly-print-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-fly_print_cloud}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER must be set} -d ${POSTGRES_DB:?POSTGRES_DB must be set}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -23,15 +23,12 @@ services:
         max-file: "5"
 
   minio:
-    image: ${MINIO_IMAGE_MIRROR:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io}/minio/minio:latest
+    image: ${MINIO_IMAGE_MIRROR:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io}/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: fly-print-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
     volumes:
       - minio_data:/data
     networks:
@@ -49,7 +46,7 @@ services:
         max-file: "5"
 
   minio-init:
-    image: ${MINIO_IMAGE_MIRROR:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io}/minio/mc:latest
+    image: ${MINIO_IMAGE_MIRROR:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io}/minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: fly-print-minio-init
     depends_on:
       minio:
@@ -58,7 +55,7 @@ services:
       - /bin/sh
       - -c
       - >
-        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin123} &&
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set} ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set} &&
         mc mb --ignore-existing local/${MINIO_BUCKET:-fly-print-files}
     networks:
       - fly-print-network
@@ -78,50 +75,66 @@ services:
         - GOPROXY=https://goproxy.cn,direct
     container_name: fly-print-api
     environment:
+      - FLY_PRINT_APP_ENVIRONMENT=${APP_ENVIRONMENT:-development}
+      - FLY_PRINT_APP_DEBUG=${APP_DEBUG:-true}
       - FLY_PRINT_DATABASE_HOST=postgres
       - FLY_PRINT_DATABASE_PORT=5432
-      - FLY_PRINT_DATABASE_DBNAME=${POSTGRES_DB:-fly_print_cloud}
-      - FLY_PRINT_DATABASE_USER=${POSTGRES_USER:-postgres}
-      - FLY_PRINT_DATABASE_PASSWORD=${POSTGRES_PASSWORD:-your-secure-password-here}
-      - FLY_PRINT_SERVER_ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8012,http://127.0.0.1:8012,http://192.168.*.*,http://10.*.*.*,http://172.16.*.*,http://172.17.*.*,http://172.18.*.*,http://172.19.*.*,http://172.2*.*.*,http://172.3*.*.*}
+      - FLY_PRINT_DATABASE_DBNAME=${POSTGRES_DB:?POSTGRES_DB must be set}
+      - FLY_PRINT_DATABASE_USER=${POSTGRES_USER:?POSTGRES_USER must be set}
+      - FLY_PRINT_DATABASE_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      - FLY_PRINT_SERVER_ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
       - FLY_PRINT_SERVER_TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-}
-      - FLY_PRINT_SERVER_PUBLIC_BASE_URL=${EXTERNAL_API_URL:-http://localhost:8012}
-      - FLY_PRINT_CREATE_DEFAULT_ADMIN=${CREATE_DEFAULT_ADMIN:-true}
-      - FLY_PRINT_DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-admin123}
+      - FLY_PRINT_SERVER_PUBLIC_BASE_URL=${EXTERNAL_API_URL:?EXTERNAL_API_URL must be set}
+      - FLY_PRINT_CREATE_DEFAULT_ADMIN=${CREATE_DEFAULT_ADMIN:-false}
+      - FLY_PRINT_DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:?DEFAULT_ADMIN_PASSWORD must be set}
       - FLY_PRINT_OAUTH2_MODE=${OAUTH2_MODE:-builtin}
-      - FLY_PRINT_OAUTH2_JWT_SIGNING_SECRET=${OAUTH2_JWT_SIGNING_SECRET:-change-this-to-a-random-secret-32chars}
+      - FLY_PRINT_OAUTH2_JWT_SIGNING_SECRET=${OAUTH2_JWT_SIGNING_SECRET:?OAUTH2_JWT_SIGNING_SECRET must be set}
       - FLY_PRINT_OAUTH2_JWT_TOKEN_EXPIRY=${OAUTH2_JWT_TOKEN_EXPIRY:-3600}
       - FLY_PRINT_OAUTH2_JWT_ISSUER=${OAUTH2_JWT_ISSUER:-fly-print-cloud}
       - FLY_PRINT_OAUTH2_CLIENT_ID=${OAUTH2_CLIENT_ID}
       - FLY_PRINT_OAUTH2_CLIENT_SECRET=${OAUTH2_CLIENT_SECRET}
       - FLY_PRINT_OAUTH2_AUTH_URL=${OAUTH2_AUTH_URL}
       - FLY_PRINT_OAUTH2_TOKEN_URL=${OAUTH2_TOKEN_URL}
-      - FLY_PRINT_OAUTH2_REDIRECT_URI=${OAUTH2_REDIRECT_URI:-http://localhost:8012/auth/callback}
+      - FLY_PRINT_OAUTH2_REDIRECT_URI=${OAUTH2_REDIRECT_URI:-}
       - FLY_PRINT_OAUTH2_USERINFO_URL=${OAUTH2_USERINFO_URL}
       - FLY_PRINT_OAUTH2_LOGOUT_URL=${OAUTH2_LOGOUT_URL}
       - FLY_PRINT_OAUTH2_LOGOUT_REDIRECT_URI_PARAM=${OAUTH2_LOGOUT_REDIRECT_URI_PARAM:-post_logout_redirect_uri}
-      - FLY_PRINT_ADMIN_CONSOLE_URL=${ADMIN_CONSOLE_URL:-http://localhost:8012}
+      - FLY_PRINT_ADMIN_CONSOLE_URL=${ADMIN_CONSOLE_URL:?ADMIN_CONSOLE_URL must be set}
       - FLY_PRINT_STORAGE_PROVIDER=${STORAGE_PROVIDER:-minio}
       - FLY_PRINT_STORAGE_DOWNLOAD_MODE=${STORAGE_DOWNLOAD_MODE:-proxy}
       - FLY_PRINT_STORAGE_MAX_SIZE=${STORAGE_MAX_SIZE:-10485760}
       - FLY_PRINT_STORAGE_MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
-      - FLY_PRINT_STORAGE_MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - FLY_PRINT_STORAGE_MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - FLY_PRINT_STORAGE_MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set}
+      - FLY_PRINT_STORAGE_MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
       - FLY_PRINT_STORAGE_MINIO_BUCKET=${MINIO_BUCKET:-fly-print-files}
       - FLY_PRINT_STORAGE_MINIO_USE_SSL=${MINIO_USE_SSL:-false}
       - FLY_PRINT_STORAGE_MINIO_OBJECT_PREFIX=${MINIO_OBJECT_PREFIX:-}
-      - FLY_PRINT_SECURITY_FILE_ACCESS_SECRET=${FILE_ACCESS_SECRET:-change-this-to-a-random-secret-32chars}
-      - FLY_PRINT_SECURITY_OAUTH_CLIENT_SECRET_ENCRYPTION_KEY=${OAUTH_CLIENT_SECRET_ENCRYPTION_KEY:-Zmx5cHJpbnQtZGVtby1lbmNyeXB0aW9uLWtleS0zMiE=}
+      - FLY_PRINT_SECURITY_FILE_ACCESS_SECRET=${FILE_ACCESS_SECRET:?FILE_ACCESS_SECRET must be set}
+      - FLY_PRINT_SECURITY_OAUTH_CLIENT_SECRET_ENCRYPTION_KEY=${OAUTH_CLIENT_SECRET_ENCRYPTION_KEY:?OAUTH_CLIENT_SECRET_ENCRYPTION_KEY must be set}
       - FLY_PRINT_SECURITY_UPLOAD_TOKEN_TTL=${UPLOAD_TOKEN_TTL:-300}
       - FLY_PRINT_SECURITY_DOWNLOAD_TOKEN_TTL=${DOWNLOAD_TOKEN_TTL:-300}
       - FLY_PRINT_SECURITY_ENTRY_COOKIE_SECURE=${ENTRY_COOKIE_SECURE:-true}
+      - FLY_PRINT_SECURITY_INSECURE_HTTP_MODE=${INSECURE_HTTP_MODE:-false}
+      - FLY_PRINT_SECURITY_INSECURE_HTTP_UNTIL=${INSECURE_HTTP_UNTIL:-}
+      - FLY_PRINT_STORAGE_UPLOAD_DIR=/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
     volumes:
-      - file_uploads:/root/uploads
+      - file_uploads:/app/uploads
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: "2.0"
+    mem_limit: 1g
+    pids_limit: 256
     networks:
       - fly-print-network
     restart: always
@@ -155,21 +168,35 @@ services:
         max-file: "2"
 
   nginx:
-    image: ${COMPOSE_LIBRARY_MIRROR:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io}/library/nginx:alpine
+    image: nginx:1.27-alpine
     container_name: fly-print-nginx
     ports:
-      - "${HTTP_PORT:-8012}:80"
-      # - "443:443"  # Disable SSL port
+      - "${HTTP_PORT:-80}:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      # - ./nginx/ssl:/etc/nginx/ssl:ro  # Disable SSL volumes
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/includes:/etc/nginx/includes:ro
+      - certbot_webroot:/var/www/certbot:ro
       - admin_build:/usr/share/nginx/html
     depends_on:
       - api
       - admin-console-builder
     networks:
       - fly-print-network
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    cpus: "1.0"
+    mem_limit: 256m
+    pids_limit: 128
     restart: always
     logging:
       driver: "json-file"
@@ -182,6 +209,8 @@ volumes:
   admin_build:
   file_uploads:
   minio_data:
+  certbot_webroot:
+  certbot_conf:
 
 networks:
   fly-print-network:

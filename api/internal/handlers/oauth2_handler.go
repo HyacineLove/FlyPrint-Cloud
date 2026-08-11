@@ -14,8 +14,6 @@ import (
 	"fly-print-cloud/api/internal/auth"
 	"fly-print-cloud/api/internal/config"
 	"fly-print-cloud/api/internal/database"
-	"fly-print-cloud/api/internal/models"
-	"fly-print-cloud/api/internal/security"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
 )
@@ -32,11 +30,6 @@ type OAuth2Handler struct {
 	logoutURL              string
 	logoutRedirectURIParam string
 	userRepo               *database.UserRepository
-}
-
-type officialRegistrationRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
 }
 
 // NewOAuth2Handler 创建 OAuth2 处理器
@@ -128,48 +121,6 @@ func (h *OAuth2Handler) Token(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
-}
-
-// Register creates only a builtin viewer account. External identity
-// provisioning remains owned by the existing OAuth2 synchronization flow.
-func (h *OAuth2Handler) Register(c *gin.Context) {
-	if h.mode != "builtin" || h.builtinAuth == nil || h.userRepo == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "official_registration_unavailable"})
-		return
-	}
-
-	var req officialRegistrationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_registration"})
-		return
-	}
-	req.Email = security.NormalizeEmail(req.Email)
-	if exists, err := h.userRepo.EmailExists(req.Email); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_check_failed"})
-		return
-	} else if exists {
-		c.JSON(http.StatusConflict, gin.H{"error": "email_exists"})
-		return
-	}
-
-	user := &models.User{
-		Username:     security.InternalUsernameForEmail(req.Email),
-		Email:        req.Email,
-		PasswordHash: req.Password,
-		Role:         officialRegistrationRole(),
-		Status:       "active",
-	}
-	if err := h.userRepo.CreateUser(user); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_registration", "message": err.Error()})
-		return
-	}
-
-	resp, err := h.builtinAuth.HandleTokenRequest("password", "", "", req.Email, req.Password, "")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "registration_login_failed"})
-		return
-	}
-	c.JSON(http.StatusCreated, resp)
 }
 
 // UserInfo 处理 GET /auth/userinfo

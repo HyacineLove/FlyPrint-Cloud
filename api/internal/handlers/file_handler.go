@@ -32,6 +32,9 @@ import (
 const (
 	defaultUploadRuleMaxSizeBytes int64 = 10 * 1024 * 1024
 	uploadRuleMaxPages                  = 5
+	fileTokenHeader                      = "X-Fly-Print-File-Token"
+	fileNodeIDHeader                     = "X-Fly-Print-Node-ID"
+	filePrinterIDHeader                  = "X-Fly-Print-Printer-ID"
 )
 
 type FileHandler struct {
@@ -99,13 +102,13 @@ func (h *FileHandler) SetTerminalSessionMatcher(matcher terminalSessionMatcher) 
 // Upload 上传文件
 func (h *FileHandler) Upload(c *gin.Context) {
 	// 检查是否使用上传凭证
-	token := c.Query("token")
+	token := c.GetHeader(fileTokenHeader)
 	var uploaderID string
 	var nodeID string
 
 	if token != "" {
 		// 第一阶段：使用轻量验证（不消耗Token），提前检查Token有效性
-		payload, err := h.tokenManager.VerifyUploadTokenAvailable(token, c.Query("node_id"), c.Query("printer_id"))
+		payload, err := h.tokenManager.VerifyUploadTokenAvailable(token, c.GetHeader(fileNodeIDHeader), c.GetHeader(filePrinterIDHeader))
 		if err != nil {
 			logger.Warn("Upload token verification failed", zap.Error(err))
 			errorCode := security.GetTokenErrorCode(err)
@@ -161,7 +164,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 			return
 		}
 		// 从查询参数获取 node_id（可选）
-		nodeID = c.Query("node_id")
+		nodeID = c.GetHeader(fileNodeIDHeader)
 	}
 
 	fileHeader, err := c.FormFile("file")
@@ -403,7 +406,7 @@ func (h *FileHandler) Download(c *gin.Context) {
 	id := c.Param("id")
 
 	// 检查是否使用下载凭证
-	token := c.Query("token")
+	token := c.GetHeader(fileTokenHeader)
 
 	if token != "" {
 		// 使用凭证验证
@@ -484,11 +487,11 @@ func (h *FileHandler) Download(c *gin.Context) {
 }
 
 // VerifyUploadToken 轻量验证上传Token（不消耗一次性Token）
-// GET /api/v1/files/verify-upload-token?token=xxx
+// GET /api/v1/files/verify-upload-token with X-Fly-Print-* headers.
 func (h *FileHandler) VerifyUploadToken(c *gin.Context) {
-	token := c.Query("token")
-	nodeID := c.Query("node_id")
-	printerID := c.Query("printer_id")
+	token := c.GetHeader(fileTokenHeader)
+	nodeID := c.GetHeader(fileNodeIDHeader)
+	printerID := c.GetHeader(filePrinterIDHeader)
 	if token == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
@@ -544,9 +547,9 @@ func (h *FileHandler) VerifyUploadToken(c *gin.Context) {
 }
 
 func (h *FileHandler) PreflightUpload(c *gin.Context) {
-	token := c.Query("token")
+	token := c.GetHeader(fileTokenHeader)
 	if token != "" {
-		payload, err := h.tokenManager.VerifyUploadTokenAvailable(token, c.Query("node_id"), c.Query("printer_id"))
+		payload, err := h.tokenManager.VerifyUploadTokenAvailable(token, c.GetHeader(fileNodeIDHeader), c.GetHeader(filePrinterIDHeader))
 		if err != nil {
 			logger.Warn("Upload token preflight verification failed", zap.Error(err))
 			errorCode := security.GetTokenErrorCode(err)

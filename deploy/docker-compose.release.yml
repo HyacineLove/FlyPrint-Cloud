@@ -1,0 +1,156 @@
+# 离线 Cloud 包的唯一运行 Compose。镜像必须先通过 docker load 导入；禁止在目标机 build 或 pull。
+services:
+  postgres:
+    image: postgres:15.13
+    pull_policy: never
+    container_name: fly-print-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [fly-print-network]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER must be set} -d ${POSTGRES_DB:?POSTGRES_DB must be set}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: always
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    pull_policy: never
+    container_name: fly-print-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
+    volumes:
+      - minio_data:/data
+    networks: [fly-print-network]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /data/.minio.sys/format.json"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: always
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    pull_policy: never
+    container_name: fly-print-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set} ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set} &&
+        mc mb --ignore-existing local/${MINIO_BUCKET:-fly-print-files}
+    networks: [fly-print-network]
+    restart: "no"
+
+  api:
+    image: ${CLOUD_API_IMAGE_TAG:?CLOUD_API_IMAGE_TAG must be set}
+    pull_policy: never
+    container_name: fly-print-api
+    environment:
+      FLY_PRINT_APP_ENVIRONMENT: ${APP_ENVIRONMENT:-production}
+      FLY_PRINT_APP_DEBUG: ${APP_DEBUG:-false}
+      FLY_PRINT_DATABASE_HOST: postgres
+      FLY_PRINT_DATABASE_PORT: 5432
+      FLY_PRINT_DATABASE_DBNAME: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      FLY_PRINT_DATABASE_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      FLY_PRINT_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      FLY_PRINT_SERVER_ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?ALLOWED_ORIGINS must be set}
+      FLY_PRINT_SERVER_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      FLY_PRINT_SERVER_PUBLIC_BASE_URL: ${EXTERNAL_API_URL:?EXTERNAL_API_URL must be set}
+      FLY_PRINT_CREATE_DEFAULT_ADMIN: ${CREATE_DEFAULT_ADMIN:-false}
+      FLY_PRINT_DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?DEFAULT_ADMIN_PASSWORD must be set}
+      FLY_PRINT_OAUTH2_MODE: ${OAUTH2_MODE:-builtin}
+      FLY_PRINT_OAUTH2_JWT_SIGNING_SECRET: ${OAUTH2_JWT_SIGNING_SECRET:?OAUTH2_JWT_SIGNING_SECRET must be set}
+      FLY_PRINT_OAUTH2_JWT_TOKEN_EXPIRY: ${OAUTH2_JWT_TOKEN_EXPIRY:-3600}
+      FLY_PRINT_OAUTH2_JWT_ISSUER: ${OAUTH2_JWT_ISSUER:-fly-print-cloud}
+      FLY_PRINT_OAUTH2_CLIENT_ID: ${OAUTH2_CLIENT_ID:-}
+      FLY_PRINT_OAUTH2_CLIENT_SECRET: ${OAUTH2_CLIENT_SECRET:-}
+      FLY_PRINT_OAUTH2_AUTH_URL: ${OAUTH2_AUTH_URL:-}
+      FLY_PRINT_OAUTH2_TOKEN_URL: ${OAUTH2_TOKEN_URL:-}
+      FLY_PRINT_OAUTH2_REDIRECT_URI: ${OAUTH2_REDIRECT_URI:-}
+      FLY_PRINT_OAUTH2_USERINFO_URL: ${OAUTH2_USERINFO_URL:-}
+      FLY_PRINT_OAUTH2_LOGOUT_URL: ${OAUTH2_LOGOUT_URL:-}
+      FLY_PRINT_OAUTH2_LOGOUT_REDIRECT_URI_PARAM: ${OAUTH2_LOGOUT_REDIRECT_URI_PARAM:-post_logout_redirect_uri}
+      FLY_PRINT_ADMIN_CONSOLE_URL: ${ADMIN_CONSOLE_URL:?ADMIN_CONSOLE_URL must be set}
+      FLY_PRINT_STORAGE_PROVIDER: ${STORAGE_PROVIDER:-minio}
+      FLY_PRINT_STORAGE_DOWNLOAD_MODE: ${STORAGE_DOWNLOAD_MODE:-proxy}
+      FLY_PRINT_STORAGE_MAX_SIZE: ${STORAGE_MAX_SIZE:-10485760}
+      FLY_PRINT_STORAGE_MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      FLY_PRINT_STORAGE_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set}
+      FLY_PRINT_STORAGE_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set}
+      FLY_PRINT_STORAGE_MINIO_BUCKET: ${MINIO_BUCKET:-fly-print-files}
+      FLY_PRINT_STORAGE_MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      FLY_PRINT_STORAGE_MINIO_OBJECT_PREFIX: ${MINIO_OBJECT_PREFIX:-}
+      FLY_PRINT_SECURITY_FILE_ACCESS_SECRET: ${FILE_ACCESS_SECRET:?FILE_ACCESS_SECRET must be set}
+      FLY_PRINT_SECURITY_OAUTH_CLIENT_SECRET_ENCRYPTION_KEY: ${OAUTH_CLIENT_SECRET_ENCRYPTION_KEY:?OAUTH_CLIENT_SECRET_ENCRYPTION_KEY must be set}
+      FLY_PRINT_SECURITY_UPLOAD_TOKEN_TTL: ${UPLOAD_TOKEN_TTL:-300}
+      FLY_PRINT_SECURITY_DOWNLOAD_TOKEN_TTL: ${DOWNLOAD_TOKEN_TTL:-300}
+      FLY_PRINT_SECURITY_ENTRY_COOKIE_SECURE: ${ENTRY_COOKIE_SECURE:-true}
+      FLY_PRINT_SECURITY_INSECURE_HTTP_MODE: ${INSECURE_HTTP_MODE:-false}
+      FLY_PRINT_SECURITY_INSECURE_HTTP_UNTIL: ${INSECURE_HTTP_UNTIL:-}
+      FLY_PRINT_STORAGE_UPLOAD_DIR: /app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - file_uploads:/app/uploads
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp:rw,noexec,nosuid,size=64m]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cpus: "2.0"
+    mem_limit: 1g
+    pids_limit: 256
+    networks: [fly-print-network]
+    restart: always
+
+  nginx:
+    image: nginx:1.27-alpine
+    pull_policy: never
+    container_name: fly-print-nginx
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/includes:/etc/nginx/includes:ro
+      - certbot_webroot:/var/www/certbot:ro
+      - ./admin-built:/usr/share/nginx/html:ro
+    depends_on: [api]
+    networks: [fly-print-network]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=64m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    cpus: "1.0"
+    mem_limit: 256m
+    pids_limit: 128
+    restart: always
+
+volumes:
+  postgres_data:
+  file_uploads:
+  minio_data:
+  certbot_webroot:
+  certbot_conf:
+
+networks:
+  fly-print-network:
+    driver: bridge

@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -331,7 +330,10 @@ func TestVerifyUploadEndpointRejectsDisabledPrinter(t *testing.T) {
 	router := gin.New()
 	router.GET("/api/v1/files/verify-upload-token", handler.VerifyUploadToken)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/verify-upload-token?token="+url.QueryEscape(token)+"&node_id=node-1&printer_id=printer-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/verify-upload-token", nil)
+	req.Header.Set(fileTokenHeader, token)
+	req.Header.Set(fileNodeIDHeader, "node-1")
+	req.Header.Set(filePrinterIDHeader, "printer-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -340,6 +342,25 @@ func TestVerifyUploadEndpointRejectsDisabledPrinter(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"error":"printer_disabled"`) {
 		t.Fatalf("body = %s, want printer_disabled", rec.Body.String())
+	}
+}
+
+func TestVerifyUploadEndpointRejectsQueryStringToken(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/v1/files/verify-upload-token", (&FileHandler{}).VerifyUploadToken)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/verify-upload-token?token=legacy-token&node_id=node-1&printer_id=printer-1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"error":"missing_token"`) {
+		t.Fatalf("body = %s, want missing_token", rec.Body.String())
 	}
 }
 

@@ -36,11 +36,13 @@ class UploadService {
   }
 
   async verifySession(token: string, nodeId: string, printerId: string): Promise<UploadSession> {
-    const response = await fetch(
-      buildApiUrl(
-        `/files/verify-upload-token?token=${encodeURIComponent(token)}&node_id=${encodeURIComponent(nodeId)}&printer_id=${encodeURIComponent(printerId)}`
-      )
-    );
+    const response = await fetch(buildApiUrl('/files/verify-upload-token'), {
+      headers: {
+        'X-Fly-Print-File-Token': token,
+        'X-Fly-Print-Node-ID': nodeId,
+        'X-Fly-Print-Printer-ID': printerId,
+      },
+    });
     const result = await response.json();
 
     if (!response.ok || result.valid === false) {

@@ -32,6 +32,8 @@ type WebSocketHandler struct {
 	uploadSessions   *database.TerminalUploadSessionRepository
 }
 
+const edgeProtocolVersion = "2"
+
 // NewWebSocketHandler 创建 WebSocket 处理器
 func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.PrinterRepository, edgeNodeRepo *database.EdgeNodeRepository, printJobRepo *database.PrintJobRepository, fileRepo *database.FileRepository, tokenManager *security.TokenManager, allowedOrigins []string, statusService *operations.StatusService, receipts *database.EdgeJobUpdateReceiptRepository, terminalSessions *database.TerminalSessionRepository, terminalTickets *database.TerminalTicketRepository, entrySessions *database.EntrySessionRepository, uploadSessions *database.TerminalUploadSessionRepository) *WebSocketHandler {
 	return &WebSocketHandler{
@@ -53,6 +55,13 @@ func NewWebSocketHandler(manager *ConnectionManager, printerRepo *database.Print
 
 // HandleConnection 处理 WebSocket 连接升级
 func (h *WebSocketHandler) HandleConnection(c *gin.Context) {
+	// 文件令牌已迁移到请求头；旧 Edge 不具备该协议，必须在握手阶段拒绝。
+	if c.GetHeader("X-Fly-Print-Protocol-Version") != edgeProtocolVersion {
+		logger.Warn("WebSocket rejected: unsupported Edge protocol version", zap.String("node_id", c.Query("node_id")))
+		c.JSON(http.StatusUpgradeRequired, gin.H{"error": "edge_upgrade_required"})
+		return
+	}
+
 	// 检查连接数限制
 	if h.manager.GetConnectionCount() >= 1000 {
 		logger.Warn("WebSocket connection limit reached (1000), rejecting new connection")

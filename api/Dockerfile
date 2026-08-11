@@ -17,15 +17,20 @@ RUN go mod verify
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
 
 # 运行阶段
-FROM ${DOCKERHUB_MIRROR}/library/alpine:latest
+FROM ${DOCKERHUB_MIRROR}/library/alpine:3.21
 
-WORKDIR /root/
+RUN addgroup -S -g 10001 flyprint && adduser -S -D -H -u 10001 -G flyprint flyprint && \
+    mkdir -p /app/uploads && chown -R flyprint:flyprint /app
+
+WORKDIR /app
 
 # 从builder阶段复制二进制文件
-COPY --from=builder /app/main .
+COPY --from=builder --chown=flyprint:flyprint /app/main ./main
 
 # 暴露端口
 EXPOSE 8080
 
 # 运行应用
+USER 10001:10001
+
 CMD ["./main"]

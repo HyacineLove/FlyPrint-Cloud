@@ -1,0 +1,11 @@
+services:
+  certbot:
+    image: ${CERTBOT_IMAGE:-certbot/certbot:v3.1.0}
+    volumes:
+      - certbot_webroot:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+    entrypoint: certbot
+
+volumes:
+  certbot_webroot:
+  certbot_conf:

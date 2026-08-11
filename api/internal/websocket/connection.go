@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -803,10 +804,10 @@ func (c *Connection) handleRequestUploadToken(msg *Message) {
 
 	// 构造两个URL（相对于 API 根路径，不包含网关前缀）
 	// 1. API上传URL：用于Edge端程序化上传（POST请求）
-	apiUploadURL := fmt.Sprintf("/api/v1/files?token=%s", token)
+	apiUploadURL := "/api/v1/files"
 
 	// 2. Web上传页面URL：用于生成二维码/链接给用户（GET请求）
-	webUploadURL := fmt.Sprintf("/entry?token=%s&node_id=%s&printer_id=%s", token, c.NodeID, payload.PrinterID)
+	webUploadURL := fmt.Sprintf("/upload#token=%s&node_id=%s&printer_id=%s", url.QueryEscape(token), url.QueryEscape(c.NodeID), url.QueryEscape(payload.PrinterID))
 
 	// 发送上传凭证响应
 	response := map[string]interface{}{

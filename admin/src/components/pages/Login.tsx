@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Form, Input, Button, Card, message, Typography, Spin } from 'antd';
 import { MailOutlined, LockOutlined } from '@ant-design/icons';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { buildAuthUrl, buildAppPath } from '../../config';
 import { apiService } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
@@ -69,8 +69,6 @@ const Login: React.FC = () => {
     return <div className="fp-auth-shell"><Spin size="large" /></div>;
   }
 
-  const registerPath = `/register${searchParams.get('return_to') ? `?return_to=${encodeURIComponent(searchParams.get('return_to') || '')}` : ''}`;
-
   return (
     <div className="fp-auth-shell">
       <Card className="fp-auth-card">
@@ -88,7 +86,6 @@ const Login: React.FC = () => {
           <Form.Item>
             <Button type="primary" htmlType="submit" loading={loading} block>登录</Button>
           </Form.Item>
-          <div style={{ textAlign: 'center' }}><Link to={registerPath}>注册官方账号</Link></div>
         </Form>
       </Card>
     </div>

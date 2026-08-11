@@ -14,8 +14,8 @@ func extractProxyFileID(fileURL string) string {
 	}
 
 	fileID := strings.TrimPrefix(fileURL, proxyFileURLPrefix)
-	if idx := strings.Index(fileID, "?"); idx >= 0 {
-		fileID = fileID[:idx]
+	if strings.Contains(fileID, "?") {
+		return ""
 	}
 	return fileID
 }

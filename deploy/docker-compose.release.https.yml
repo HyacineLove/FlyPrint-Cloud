@@ -1,0 +1,13 @@
+services:
+  nginx:
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d-https:/etc/nginx/conf.d:ro
+      - ./nginx/includes:/etc/nginx/includes:ro
+      - certbot_webroot:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+
+volumes:
+  certbot_webroot:
+  certbot_conf:

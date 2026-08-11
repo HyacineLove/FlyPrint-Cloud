@@ -1,0 +1,12 @@
+services:
+  certbot:
+    image: certbot/certbot:v3.1.0
+    pull_policy: never
+    volumes:
+      - certbot_webroot:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+    entrypoint: certbot
+
+volumes:
+  certbot_webroot:
+  certbot_conf:

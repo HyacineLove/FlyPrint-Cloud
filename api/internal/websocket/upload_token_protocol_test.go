@@ -29,8 +29,12 @@ func TestUploadTokenErrorPreservesRequestID(t *testing.T) {
 	}
 }
 
-func TestUploadTokenResponsePayloadIncludesRequestID(t *testing.T) {
-	payload := UploadTokenResponsePayload{RequestID: "request-2"}
+func TestUploadTokenResponsePayloadUsesHeaderTokenAndFragmentWebURL(t *testing.T) {
+	payload := UploadTokenResponsePayload{
+		RequestID: "request-2",
+		UploadURL: "/api/v1/files",
+		WebURL:    "/upload#token=opaque&node_id=node-1&printer_id=printer-1",
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +45,12 @@ func TestUploadTokenResponsePayloadIncludesRequestID(t *testing.T) {
 	}
 	if decoded["request_id"] != "request-2" {
 		t.Fatalf("request id was not encoded: %#v", decoded)
+	}
+	if decoded["upload_url"] != "/api/v1/files" {
+		t.Fatalf("upload URL = %#v, want header-authenticated endpoint", decoded["upload_url"])
+	}
+	if decoded["web_url"] != "/upload#token=opaque&node_id=node-1&printer_id=printer-1" {
+		t.Fatalf("web URL = %#v, want fragment credential", decoded["web_url"])
 	}
 }
 

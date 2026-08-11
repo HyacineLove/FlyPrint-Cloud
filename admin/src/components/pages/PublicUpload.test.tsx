@@ -16,14 +16,16 @@ jest.mock('../../services/api', () => ({
 
 const mockedApiService = apiService as jest.Mocked<typeof apiService>;
 
-const renderUploadPage = (path: string) =>
-  render(
+const renderUploadPage = (path: string) => {
+  window.history.replaceState({}, '', path);
+  return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/upload" element={<PublicUpload />} />
       </Routes>
     </MemoryRouter>
   );
+};
 
 describe('PublicUpload', () => {
   beforeEach(() => {
@@ -71,7 +73,7 @@ describe('PublicUpload', () => {
       } as Response;
     }) as jest.Mock;
 
-    renderUploadPage('/upload?token=test-token&node_id=node-1&printer_id=printer-1');
+    renderUploadPage('/upload#token=test-token&node_id=node-1&printer_id=printer-1');
 
     await screen.findByText(/1(\.0)? KB/i);
     expect(screen.queryByText(/剩余时间/i)).not.toBeInTheDocument();
@@ -117,7 +119,7 @@ describe('PublicUpload', () => {
       } as Response;
     }) as jest.Mock;
 
-    renderUploadPage('/upload?token=test-token&node_id=node-1&printer_id=printer-1');
+    renderUploadPage('/upload#token=test-token&node_id=node-1&printer_id=printer-1');
 
     await screen.findByText(/文件上传/i);
 
@@ -167,7 +169,7 @@ describe('PublicUpload', () => {
       },
     });
 
-    renderUploadPage('/upload?token=test-token&node_id=node-1&printer_id=printer-1');
+    renderUploadPage('/upload#token=test-token&node_id=node-1&printer_id=printer-1');
 
     await screen.findByText(/文件上传/i);
 
@@ -228,7 +230,7 @@ describe('PublicUpload', () => {
       },
     });
 
-    renderUploadPage('/upload?token=test-token&node_id=node-1&printer_id=printer-1');
+    renderUploadPage('/upload#token=test-token&node_id=node-1&printer_id=printer-1');
 
     await screen.findByRole('heading', { name: '文件上传' });
 

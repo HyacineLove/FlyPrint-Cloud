@@ -22,7 +22,6 @@ import Printers from './components/pages/Printers';
 import PrintJobs from './components/pages/PrintJobs';
 import PublicUpload from './components/pages/PublicUpload';
 import Login from './components/pages/Login';
-import Register from './components/pages/Register';
 import BusinessSettings from './components/pages/BusinessSettings';
 import SitePortals from './components/pages/SitePortals';
 import OpsContacts from './components/pages/OpsContacts';
@@ -253,7 +252,6 @@ const App: React.FC = () => {
           
           {/* 登录页面 (builtin OAuth2 模式) */}
           <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
           
           {/* 其他路由都进入管理后台应用 (需要登录) */}
           <Route path="/*" element={<AdminApp />} />

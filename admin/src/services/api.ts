@@ -139,18 +139,15 @@ class ApiService {
     try {
       // 官方终端上传同时携带 terminal token 与官方账号 JWT。
       if (uploadToken) {
-        let url = buildApiUrl(`/files?token=${encodeURIComponent(uploadToken)}`);
-        if (nodeId) {
-          url += `&node_id=${encodeURIComponent(nodeId)}`;
-        }
-        if (printerId) {
-          url += `&printer_id=${encodeURIComponent(printerId)}`;
-        }
-        
         const authToken = await this.getToken();
-        const response = await fetch(url, {
+        const response = await fetch(buildApiUrl('/files'), {
           method: 'POST',
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
+          headers: {
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+            'X-Fly-Print-File-Token': uploadToken,
+            ...(nodeId ? { 'X-Fly-Print-Node-ID': nodeId } : {}),
+            ...(printerId ? { 'X-Fly-Print-Printer-ID': printerId } : {}),
+          },
           body: formData,
         });
         
@@ -193,12 +190,9 @@ class ApiService {
     formData.append('file', file);
 
     try {
-      let url = buildApiUrl('/files/preflight');
-      if (uploadToken) {
-        url += `?token=${encodeURIComponent(uploadToken)}`;
-      }
-      const response = await fetch(url, {
+      const response = await fetch(buildApiUrl('/files/preflight'), {
         method: 'POST',
+        headers: uploadToken ? { 'X-Fly-Print-File-Token': uploadToken } : undefined,
         body: formData,
       });
       const result = await response.json();

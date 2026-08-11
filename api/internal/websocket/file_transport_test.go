@@ -27,7 +27,7 @@ func TestExtractProxyFileID(t *testing.T) {
 		want    string
 	}{
 		{name: "proxy path", fileURL: "/api/v1/files/file-123", want: "file-123"},
-		{name: "proxy path with token", fileURL: "/api/v1/files/file-123?token=abc", want: "file-123"},
+		{name: "proxy path with query credential rejected", fileURL: "/api/v1/files/file-123?token=abc", want: ""},
 		{name: "absolute URL ignored in phase one", fileURL: "https://minio.local/bucket/object?X-Amz-Signature=abc", want: ""},
 		{name: "empty", fileURL: "", want: ""},
 	}

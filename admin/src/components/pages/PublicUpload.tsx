@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Result, Spin, Typography, message } from 'antd';
 import { CheckCircleOutlined, FileOutlined, LogoutOutlined } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
 import { apiService } from '../../services/api';
 import { UploadPolicy, uploadService } from '../../services/upload';
 import { buildAppPath, buildAuthUrl } from '../../config';
@@ -190,7 +189,6 @@ const validateSelectedFile = (file: File, policy: UploadPolicy): string | null =
 };
 
 const PublicUpload: React.FC = () => {
-  const [searchParams] = useSearchParams();
   const [pageState, setPageState] = useState<PageState>('verifying');
   const [pageErrorMessage, setPageErrorMessage] = useState('');
   const [policy, setPolicy] = useState<UploadPolicy | null>(null);
@@ -204,9 +202,15 @@ const PublicUpload: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const tokenParam = searchParams.get('token');
-    const nodeIdParam = searchParams.get('node_id');
-    const printerIdParam = searchParams.get('printer_id');
+    const fragment = window.location.hash || window.sessionStorage.getItem('fly-print-upload-fragment') || '';
+    window.sessionStorage.removeItem('fly-print-upload-fragment');
+    if (window.location.hash) {
+      window.history.replaceState(null, document.title, window.location.pathname);
+    }
+    const fragmentParams = new URLSearchParams(fragment.replace(/^#/, ''));
+    const tokenParam = fragmentParams.get('token');
+    const nodeIdParam = fragmentParams.get('node_id');
+    const printerIdParam = fragmentParams.get('printer_id');
 
     if (!tokenParam || !nodeIdParam || !printerIdParam) {
       setPageErrorMessage('缺少上传参数，请到飞印终端重新扫码后再试。');
@@ -220,7 +224,8 @@ const PublicUpload: React.FC = () => {
       try {
         const authToken = await apiService.getToken();
         if (!authToken) {
-          const returnTo = `${window.location.pathname}${window.location.search}`;
+          window.sessionStorage.setItem('fly-print-upload-fragment', fragment);
+          const returnTo = window.location.pathname;
           window.location.assign(`${buildAppPath('/login')}?return_to=${encodeURIComponent(returnTo)}`);
           return;
         }
@@ -257,7 +262,7 @@ const PublicUpload: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
+  }, []);
 
   useEffect(() => {
     if (pageState !== 'ready' || !expiresAtMs) {

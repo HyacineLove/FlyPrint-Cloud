@@ -47,7 +47,7 @@ func CORSMiddleware(allowedOrigins []string) gin.HandlerFunc {
 		}
 
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-Requested-With, X-Fly-Print-File-Token, X-Fly-Print-Node-ID, X-Fly-Print-Printer-ID")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
