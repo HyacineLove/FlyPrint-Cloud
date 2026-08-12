@@ -21,6 +21,7 @@ import (
 	"fly-print-cloud/api/internal/models"
 	"fly-print-cloud/api/internal/security"
 	"fly-print-cloud/api/internal/storage"
+	"fly-print-cloud/api/internal/websocket"
 
 	"github.com/gin-gonic/gin"
 )
@@ -394,6 +395,27 @@ func TestFileHandlerStorageUploadUsesStorageBackend(t *testing.T) {
 	}
 	if got := store.objects[store.lastPutKey]; !bytes.Equal(got, samplePNGBytes()) {
 		t.Fatalf("stored payload = %v, want %v", got, samplePNGBytes())
+	}
+}
+
+func TestOAuthUploadRejectsEdgeNodeHeaderWithoutTerminalToken(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	repo := &fakeFileRepository{}
+	handler, store := newStorageFileHandler(t, repo)
+	handler.wsManager = websocket.NewConnectionManager(nil, nil)
+	router := newUploadTestRouter(handler)
+	req := newPNGUploadRequest(t)
+	req.Header.Set(fileNodeIDHeader, "other-edge-node")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("OAuth upload with node header = %d, want %d, body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+	if store.putCalls != 0 {
+		t.Fatalf("storage.Put() calls = %d, want 0", store.putCalls)
 	}
 }
 

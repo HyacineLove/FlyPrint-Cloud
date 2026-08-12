@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -20,8 +21,9 @@ import (
 
 // OAuth2Handler OAuth2 认证处理器
 type OAuth2Handler struct {
-	mode        string // "builtin" | "keycloak"
-	builtinAuth *auth.BuiltinAuthService
+	mode         string // "builtin" | "keycloak"
+	builtinAuth  *auth.BuiltinAuthService
+	cookieSecure bool
 
 	// Keycloak 模式字段
 	config                 *oauth2.Config
@@ -32,11 +34,17 @@ type OAuth2Handler struct {
 	userRepo               *database.UserRepository
 }
 
+const (
+	oauthStateCookieName = "flyprint_oauth_state"
+	oauthStateTTL        = 10 * time.Minute
+)
+
 // NewOAuth2Handler 创建 OAuth2 处理器
-func NewOAuth2Handler(oauth2Cfg *config.OAuth2Config, adminCfg *config.AdminConfig, userRepo *database.UserRepository, builtinAuth *auth.BuiltinAuthService) *OAuth2Handler {
+func NewOAuth2Handler(oauth2Cfg *config.OAuth2Config, adminCfg *config.AdminConfig, userRepo *database.UserRepository, builtinAuth *auth.BuiltinAuthService, cookieSecure bool) *OAuth2Handler {
 	handler := &OAuth2Handler{
 		mode:            oauth2Cfg.Mode,
 		builtinAuth:     builtinAuth,
+		cookieSecure:    cookieSecure,
 		adminConsoleURL: adminCfg.ConsoleURL,
 		userRepo:        userRepo,
 	}
@@ -169,6 +177,7 @@ func (h *OAuth2Handler) Login(c *gin.Context) {
 	}
 
 	state := generateRandomState()
+	h.setCookie(c, oauthStateCookieName, state, int(oauthStateTTL.Seconds()), "/auth/callback")
 	authURL := h.config.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	c.Redirect(http.StatusFound, authURL)
 }
@@ -184,6 +193,9 @@ func (h *OAuth2Handler) Callback(c *gin.Context) {
 	// Keycloak 模式
 	if h.config == nil {
 		BadRequestResponse(c, "OAuth2 配置未设置")
+		return
+	}
+	if !h.validateAndClearState(c) {
 		return
 	}
 
@@ -208,16 +220,15 @@ func (h *OAuth2Handler) Callback(c *gin.Context) {
 		return
 	}
 
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("access_token", token.AccessToken, int(time.Until(token.Expiry).Seconds()), "/", "", false, true)
+	h.setCookie(c, "access_token", token.AccessToken, int(time.Until(token.Expiry).Seconds()), "/")
 
 	if token.RefreshToken != "" {
-		c.SetCookie("refresh_token", token.RefreshToken, 7*24*3600, "/", "", false, true)
+		h.setCookie(c, "refresh_token", token.RefreshToken, 7*24*3600, "/")
 	}
 
 	if idToken := token.Extra("id_token"); idToken != nil {
 		if idTokenStr, ok := idToken.(string); ok {
-			c.SetCookie("id_token", idTokenStr, int(time.Until(token.Expiry).Seconds()), "/", "", false, true)
+			h.setCookie(c, "id_token", idTokenStr, int(time.Until(token.Expiry).Seconds()), "/")
 		}
 	}
 
@@ -378,9 +389,9 @@ func (h *OAuth2Handler) Logout(c *gin.Context) {
 	idToken, _ := c.Cookie("id_token")
 
 	// 清除所有认证相关的 cookies
-	c.SetCookie("access_token", "", -1, "/", "", false, true)
-	c.SetCookie("refresh_token", "", -1, "/", "", false, true)
-	c.SetCookie("id_token", "", -1, "/", "", false, true)
+	h.clearCookie(c, "access_token", "/")
+	h.clearCookie(c, "refresh_token", "/")
+	h.clearCookie(c, "id_token", "/")
 
 	if h.mode == "builtin" || h.logoutURL == "" {
 		// 内置模式或没有配置登出 URL：只做本地登出
@@ -405,4 +416,24 @@ func generateRandomState() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+func (h *OAuth2Handler) validateAndClearState(c *gin.Context) bool {
+	expected, err := c.Cookie(oauthStateCookieName)
+	h.clearCookie(c, oauthStateCookieName, "/auth/callback")
+	actual := c.Query("state")
+	if err != nil || expected == "" || actual == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) != 1 {
+		BadRequestResponse(c, "OAuth2 state 无效或已过期")
+		return false
+	}
+	return true
+}
+
+func (h *OAuth2Handler) setCookie(c *gin.Context, name, value string, maxAge int, path string) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(name, value, maxAge, path, "", h.cookieSecure, true)
+}
+
+func (h *OAuth2Handler) clearCookie(c *gin.Context, name, path string) {
+	h.setCookie(c, name, "", -1, path)
 }

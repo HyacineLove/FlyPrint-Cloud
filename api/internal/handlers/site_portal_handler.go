@@ -131,7 +131,7 @@ func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
 		}
 		return
 	}
-	payload := websocket.PortalSessionReadyPayload{SitePortalCode: completion.SitePortalCode, ClaimBaseURL: completion.ClaimBaseURL, ClaimCode: in.ClaimCode, TerminalSessionID: completion.TerminalSessionID, CloudUserID: completion.CloudUserID, ExpiresAt: in.ClaimExpiresAt}
+	payload := websocket.PortalSessionReadyPayload{SitePortalCode: completion.SitePortalCode, SitePortalDisplayName: completion.SitePortalDisplayName, ClaimBaseURL: completion.ClaimBaseURL, ClaimCode: in.ClaimCode, TerminalSessionID: completion.TerminalSessionID, CloudUserID: completion.CloudUserID, ExpiresAt: in.ClaimExpiresAt}
 	if err := h.dispatcher.DispatchPortalSessionReady(completion.NodeID, payload); err != nil {
 		if completion.ReadyEventID != "" && h.readyOutbox != nil {
 			c.JSON(http.StatusAccepted, gin.H{"cloud_user_id": completion.CloudUserID, "notification_pending": true})

@@ -35,10 +35,11 @@ type ExternalIdentity struct {
 
 // PortalLoginCompletion is the non-secret Cloud result needed to notify an Edge.
 type PortalLoginCompletion struct {
-	NodeID            string
-	TerminalSessionID string
-	CloudUserID       string
-	SitePortalCode    string
-	ClaimBaseURL      string
-	ReadyEventID      string
+	NodeID                string
+	TerminalSessionID     string
+	CloudUserID           string
+	SitePortalCode        string
+	SitePortalDisplayName string
+	ClaimBaseURL          string
+	ReadyEventID          string
 }

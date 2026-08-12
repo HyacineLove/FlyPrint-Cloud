@@ -32,9 +32,9 @@ import (
 const (
 	defaultUploadRuleMaxSizeBytes int64 = 10 * 1024 * 1024
 	uploadRuleMaxPages                  = 5
-	fileTokenHeader                      = "X-Fly-Print-File-Token"
-	fileNodeIDHeader                     = "X-Fly-Print-Node-ID"
-	filePrinterIDHeader                  = "X-Fly-Print-Printer-ID"
+	fileTokenHeader                     = "X-Fly-Print-File-Token"
+	fileNodeIDHeader                    = "X-Fly-Print-Node-ID"
+	filePrinterIDHeader                 = "X-Fly-Print-Printer-ID"
 )
 
 type FileHandler struct {
@@ -163,8 +163,16 @@ func (h *FileHandler) Upload(c *gin.Context) {
 			})
 			return
 		}
-		// 从查询参数获取 node_id（可选）
-		nodeID = c.GetHeader(fileNodeIDHeader)
+		// 节点上下文只能由一次性终端上传凭证授权。OAuth 上传仅保存
+		// 调用者自己的文件，不能借请求头向任意 Edge 推送预览。
+		if strings.TrimSpace(c.GetHeader(fileNodeIDHeader)) != "" || strings.TrimSpace(c.GetHeader(filePrinterIDHeader)) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"error":   "terminal_upload_token_required",
+				"message": "Edge upload context requires a terminal upload token",
+			})
+			return
+		}
 	}
 
 	fileHeader, err := c.FormFile("file")
@@ -599,6 +607,15 @@ func (h *FileHandler) PreflightUpload(c *gin.Context) {
 				})
 				return
 			}
+		}
+		if strings.TrimSpace(c.GetHeader(fileNodeIDHeader)) != "" || strings.TrimSpace(c.GetHeader(filePrinterIDHeader)) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code":    400,
+				"error":   "terminal_upload_token_required",
+				"message": "Edge upload context requires a terminal upload token",
+				"valid":   false,
+			})
+			return
 		}
 	}
 	fileHeader, err := c.FormFile("file")

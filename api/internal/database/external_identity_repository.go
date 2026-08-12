@@ -79,12 +79,12 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		nodeID, printerID, terminalSessionID string
 		selectedEntry, ticketStatus          string
 		expiresAt                            time.Time
-		claimBaseURL                         string
+		claimBaseURL, portalDisplayName      string
 		portalEnabled                        bool
 	)
 	if input.PortalAttemptID != "" {
 		err = tx.QueryRow(`SELECT entry.node_id,entry.printer_id::text,entry.terminal_session_id,
-			attempt.site_portal_code,attempt.status,entry.expires_at,portal.claim_base_url,portal.enabled
+			attempt.site_portal_code,attempt.status,entry.expires_at,portal.claim_base_url,portal.display_name,portal.enabled
 			FROM entry_portal_attempts attempt
 			JOIN entry_sessions entry ON entry.id=attempt.entry_session_id
 			JOIN edge_terminal_sessions session ON session.node_id=entry.node_id
@@ -94,12 +94,12 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 			WHERE attempt.id=$1::uuid AND attempt.site_portal_code=$2 AND attempt.status='opened'
 				AND attempt.version=entry.portal_attempt_version AND entry.status='entry_active'
 			FOR UPDATE OF attempt,entry`, input.PortalAttemptID, input.SitePortalCode).Scan(
-			&nodeID, &printerID, &terminalSessionID, &selectedEntry, &ticketStatus, &expiresAt, &claimBaseURL, &portalEnabled,
+			&nodeID, &printerID, &terminalSessionID, &selectedEntry, &ticketStatus, &expiresAt, &claimBaseURL, &portalDisplayName, &portalEnabled,
 		)
 	} else {
 		err = tx.QueryRow(`SELECT ticket.node_id,ticket.printer_id,ticket.terminal_session_id,
 			COALESCE(ticket.selected_entry,''),ticket.status,ticket.expires_at,
-			portal.claim_base_url,portal.enabled
+			portal.claim_base_url,portal.display_name,portal.enabled
 			FROM terminal_tickets ticket
 			JOIN edge_terminal_sessions session ON session.node_id=ticket.node_id
 				AND session.terminal_session_id=ticket.terminal_session_id
@@ -110,7 +110,7 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 			WHERE ticket.ticket_hash=$1
 			FOR UPDATE OF ticket`, input.TicketHash, input.SitePortalCode).Scan(
 			&nodeID, &printerID, &terminalSessionID, &selectedEntry, &ticketStatus,
-			&expiresAt, &claimBaseURL, &portalEnabled,
+			&expiresAt, &claimBaseURL, &portalDisplayName, &portalEnabled,
 		)
 	}
 	if err != nil {
@@ -222,12 +222,13 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 	readyEventID := ""
 	if input.ClaimCode != "" && !input.ClaimExpiresAt.IsZero() {
 		payload, marshalErr := json.Marshal(map[string]interface{}{
-			"site_portal_code":    input.SitePortalCode,
-			"claim_base_url":      claimBaseURL,
-			"claim_code":          input.ClaimCode,
-			"terminal_session_id": terminalSessionID,
-			"cloud_user_id":       cloudUserID,
-			"expires_at":          input.ClaimExpiresAt,
+			"site_portal_code":         input.SitePortalCode,
+			"site_portal_display_name": portalDisplayName,
+			"claim_base_url":           claimBaseURL,
+			"claim_code":               input.ClaimCode,
+			"terminal_session_id":      terminalSessionID,
+			"cloud_user_id":            cloudUserID,
+			"expires_at":               input.ClaimExpiresAt,
 		})
 		if marshalErr != nil {
 			return nil, fmt.Errorf("marshal portal ready payload: %w", marshalErr)
@@ -244,11 +245,12 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 		return nil, err
 	}
 	return &models.PortalLoginCompletion{
-		NodeID:            nodeID,
-		TerminalSessionID: terminalSessionID,
-		CloudUserID:       cloudUserID,
-		SitePortalCode:    input.SitePortalCode,
-		ClaimBaseURL:      claimBaseURL,
-		ReadyEventID:      readyEventID,
+		NodeID:                nodeID,
+		TerminalSessionID:     terminalSessionID,
+		CloudUserID:           cloudUserID,
+		SitePortalCode:        input.SitePortalCode,
+		SitePortalDisplayName: portalDisplayName,
+		ClaimBaseURL:          claimBaseURL,
+		ReadyEventID:          readyEventID,
 	}, nil
 }

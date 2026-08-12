@@ -1,4 +1,4 @@
-ARG DOCKERHUB_MIRROR=docker.1ms.run
+ARG DOCKERHUB_MIRROR=docker.io
 FROM ${DOCKERHUB_MIRROR}/library/golang:1.25-alpine AS builder
 
 # 设置Go代理和网络配置

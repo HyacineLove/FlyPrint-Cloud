@@ -1,5 +1,5 @@
 # 构建阶段
-ARG DOCKERHUB_MIRROR=docker.1ms.run
+ARG DOCKERHUB_MIRROR=docker.io
 FROM ${DOCKERHUB_MIRROR}/library/node:18-alpine AS builder
 
 WORKDIR /app

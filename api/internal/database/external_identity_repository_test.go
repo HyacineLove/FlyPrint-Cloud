@@ -20,7 +20,7 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ticket.node_id,ticket.printer_id,ticket.terminal_session_id,
 		COALESCE(ticket.selected_entry,''),ticket.status,ticket.expires_at,
-		portal.claim_base_url,portal.enabled
+		portal.claim_base_url,portal.display_name,portal.enabled
 		FROM terminal_tickets ticket
 		JOIN edge_terminal_sessions session ON session.node_id=ticket.node_id
 			AND session.terminal_session_id=ticket.terminal_session_id
@@ -33,9 +33,9 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		WithArgs("ticket-hash", "official").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"node_id", "printer_id", "terminal_session_id", "selected_entry",
-			"status", "expires_at", "claim_base_url", "enabled",
+			"status", "expires_at", "claim_base_url", "display_name", "enabled",
 		}).AddRow("edge-1", "printer-1", "session-1", "official", "selected", expiresAt,
-			"https://portal.example.test", true))
+			"https://portal.example.test", "Official Portal", true))
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT identity.cloud_user_id,user_account.status
 		FROM external_identities identity
 		JOIN users user_account ON user_account.id=identity.cloud_user_id
@@ -86,7 +86,7 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		t.Fatalf("CompleteLogin() error = %v", err)
 	}
 	if completion.NodeID != "edge-1" || completion.TerminalSessionID != "session-1" ||
-		completion.CloudUserID != "cloud-user-1" || completion.ClaimBaseURL != "https://portal.example.test" || completion.ReadyEventID == "" {
+		completion.CloudUserID != "cloud-user-1" || completion.SitePortalDisplayName != "Official Portal" || completion.ClaimBaseURL != "https://portal.example.test" || completion.ReadyEventID == "" {
 		t.Fatalf("unexpected completion: %#v", completion)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -105,9 +105,9 @@ func TestCompletePortalLoginReusesExistingMapping(t *testing.T) {
 		WithArgs("ticket-hash", "official").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"node_id", "printer_id", "terminal_session_id", "selected_entry",
-			"status", "expires_at", "claim_base_url", "enabled",
+			"status", "expires_at", "claim_base_url", "display_name", "enabled",
 		}).AddRow("edge-1", "printer-1", "session-1", "official", "selected", now.Add(time.Minute),
-			"https://portal.example.test", true))
+			"https://portal.example.test", "Official Portal", true))
 	mock.ExpectQuery("SELECT identity.cloud_user_id").
 		WithArgs("official", "external-user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"cloud_user_id", "status"}).AddRow("cloud-user-existing", "active"))
@@ -154,9 +154,9 @@ func TestCompletePortalLoginRejectsInactiveMappedUserWithoutConsumingTicket(t *t
 		WithArgs("ticket-hash", "official").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"node_id", "printer_id", "terminal_session_id", "selected_entry",
-			"status", "expires_at", "claim_base_url", "enabled",
+			"status", "expires_at", "claim_base_url", "display_name", "enabled",
 		}).AddRow("edge-1", "printer-1", "session-1", "official", "selected", now.Add(time.Minute),
-			"https://portal.example.test", true))
+			"https://portal.example.test", "Official Portal", true))
 	mock.ExpectQuery("SELECT identity.cloud_user_id").
 		WithArgs("official", "external-user-1").
 		WillReturnRows(sqlmock.NewRows([]string{"cloud_user_id", "status"}).AddRow("cloud-user-1", "inactive"))

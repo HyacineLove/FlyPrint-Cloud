@@ -25,11 +25,7 @@ import (
 	"fly-print-cloud/api/internal/websocket"
 
 	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
-
-	_ "fly-print-cloud/api/docs" // Swagger 生成的文档
 )
 
 // @title           Fly Print Cloud API
@@ -232,7 +228,7 @@ func main() {
 	printerHandler := handlers.NewPrinterHandler(printerRepo, edgeNodeRepo, printJobRepo, wsManager, tokenUsageRepo, statusService, alertRepo)
 	printJobHandler := handlers.NewPrintJobHandler(printJobRepo, printerRepo, edgeNodeRepo, wsManager, statusService, alertRepo)
 	portalPrintHandler := handlers.NewPortalPrintHandler(printAuthorizationRepo)
-	oauth2Handler := handlers.NewOAuth2Handler(&cfg.OAuth2, &cfg.Admin, userRepo, builtinAuth)
+	oauth2Handler := handlers.NewOAuth2Handler(&cfg.OAuth2, &cfg.Admin, userRepo, builtinAuth, cfg.Security.EntryCookieSecure)
 	fileHandler := handlers.NewFileHandler(fileRepo, &cfg.Storage, storageService, wsManager, tokenManager, businessSettingsService, edgeNodeRepo, printerRepo)
 	fileHandler.SetTerminalUploadSessionBinder(terminalUploadSessions)
 	fileHandler.SetTerminalSessionMatcher(terminalSessionRepo)
@@ -346,9 +342,6 @@ func ensureBootstrapSitePortalClient(repo *database.OAuth2ClientRepository, ciph
 func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandler *handlers.EdgeNodeHandler, edgeActivationHandler *handlers.EdgeActivationHandler, printerHandler *handlers.PrinterHandler, printJobHandler *handlers.PrintJobHandler, portalPrintHandler *handlers.PortalPrintHandler, wsHandler *websocket.WebSocketHandler, oauth2Handler *handlers.OAuth2Handler, fileHandler *handlers.FileHandler, terminalTicketHandler *handlers.TerminalTicketHandler, sitePortalHandler *handlers.SitePortalHandler, sitePortalAdminHandler *handlers.SitePortalAdminHandler, businessSettingsHandler *handlers.BusinessSettingsHandler, opsContactHandler *handlers.OpsContactHandler, healthHandler *handlers.HealthHandler, printJobRepo *database.PrintJobRepository, edgeNodeRepo *database.EdgeNodeRepository, printerRepo *database.PrinterRepository, alertRepo *database.OperationalAlertRepository) {
 	r.GET("/entry", terminalTicketHandler.EntryPage)
 	r.GET("/entry/options", terminalTicketHandler.SelectPage)
-	// Swagger 文档路由
-	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-
 	// 公开健康检查路由（快速响应）
 	r.GET("/health", healthHandler.BasicHealth)
 	r.HEAD("/health", healthHandler.BasicHealth)
@@ -380,10 +373,6 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 		apiV1Group.POST("/public/terminal-entry/acquire", terminalTicketHandler.Acquire)
 		apiV1Group.GET("/public/terminal-entry/status", terminalTicketHandler.EntryStatus)
 		apiV1Group.POST("/public/terminal-entry/select", terminalTicketHandler.SelectEntry)
-		// 详细健康检查（包含各组件状态）
-		apiV1Group.GET("/health", healthHandler.DetailedHealth)
-		apiV1Group.HEAD("/health", healthHandler.DetailedHealth)
-
 		// Admin Console API - 需要 admin:* scope
 		adminGroup := apiV1Group.Group("/admin")
 		{
@@ -472,15 +461,8 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 			}
 		}
 
-		// Cloud 打印 API - 需要 print:submit 权限
-		printGroup := apiV1Group.Group("/print-jobs", middleware.OAuth2ResourceServer("print:submit"))
-		{
-			printGroup.POST("", printJobHandler.CreatePrintJob)
-			printGroup.GET("/:id", printJobHandler.GetPrintJob)
-		}
-
-		// Cloud 打印机列表 API - 需要 print:submit 权限
-		apiV1Group.GET("/printers", middleware.OAuth2ResourceServer("print:submit"), printerHandler.ListPrinters)
+		// 直接 print:submit API 暂不对外注册；当前打印主链仅由已授权的
+		// Edge/Portal 会话驱动，管理端继续使用 /api/v1/admin/* 只读查看。
 
 		// Edge Node API - 需要 edge:* scope
 		edgeGroup := apiV1Group.Group("/edge")
