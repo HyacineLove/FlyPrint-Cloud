@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Card, Descriptions, Drawer, Form, Input, Modal, Popconfirm, Space, Switch, Table, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
+import type { ApiResponse } from '../../services/api';
 import { EntityCell, FullIdentifier } from '../DisplayValue';
 
 interface SitePortal {
@@ -11,14 +12,8 @@ interface SitePortal {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const me = await fetch(buildAuthUrl('me'));
-  const token = (await me.json())?.data?.access_token;
-  const response = await fetch(buildApiUrl(path), {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers || {}) },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.message || body.error || `HTTP ${response.status}`);
+  const body = await apiService.request<ApiResponse<any>>(path, init);
+  if (body.code !== 200 && body.code !== 201) throw new Error(body.message || '请求失败');
   return body.data;
 }
 

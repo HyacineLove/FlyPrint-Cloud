@@ -70,6 +70,10 @@ describe('EdgeNodes Site Portal configuration', () => {
     render(<MemoryRouter><EdgeNodes /></MemoryRouter>);
 
     const configButton = await screen.findByTestId('node-site-portals-node-1');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/auth/me'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/admin/site-portals'))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/admin/edge-nodes/node-1/site-portals'))).toBe(false);
+
     fireEvent.click(configButton);
     expect((await screen.findAllByText('校园入口')).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: '保存配置' }));

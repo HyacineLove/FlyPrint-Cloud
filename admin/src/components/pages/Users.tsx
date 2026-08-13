@@ -4,8 +4,8 @@ import { EditOutlined, EyeOutlined, KeyOutlined, PlusOutlined } from '@ant-desig
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import type { FilterValue, SorterResult } from 'antd/es/table/interface';
 import { Link, useSearchParams } from 'react-router-dom';
-import { buildApiUrl } from '../../config';
 import { apiService } from '../../services/api';
+import type { ApiResponse } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
 import { EntityCell, FullIdentifier } from '../DisplayValue';
 
@@ -38,7 +38,6 @@ const formatDate = (value?: string) => (value ? new Date(value).toLocaleString()
 const Users: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [token, setToken] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<ManagedUser>();
   const [formVisible, setFormVisible] = useState(false);
@@ -64,7 +63,7 @@ const Users: React.FC = () => {
   const [passwordForm] = Form.useForm<{ new_password: string }>();
   const [quotaForm] = Form.useForm<{ amount: number; reason: string }>();
 
-  const load = useCallback(async (accessToken: string, nextPage = page) => {
+  const load = useCallback(async (nextPage = page) => {
     setLoading(true);
     try {
       const query = new URLSearchParams({ page: String(nextPage), page_size: String(pageSize) });
@@ -73,11 +72,8 @@ const Users: React.FC = () => {
       if (status) query.set('status', status);
       if (sortBy) query.set('sort_by', sortBy);
       if (sortOrder) query.set('sort_order', sortOrder);
-      const response = await fetch(buildApiUrl(`/admin/users?${query.toString()}`), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) throw new Error(result.message || '加载用户失败');
+      const result = await apiService.get<{ items: ManagedUser[]; pagination?: { total?: number } }>(`/admin/users?${query.toString()}`);
+      if (result.code !== 200) throw new Error(result.message || '加载用户失败');
       setUsers(result.data?.items || []);
       setTotal(result.data?.pagination?.total || 0);
       setPage(nextPage);
@@ -89,13 +85,7 @@ const Users: React.FC = () => {
   }, [page, pageSize, role, search, sortBy, sortOrder, status]);
 
   useEffect(() => {
-    void (async () => {
-      const accessToken = await apiService.getToken();
-      if (accessToken) {
-        setToken(accessToken);
-        await load(accessToken, 1);
-      } else setLoading(false);
-    })();
+    void load(1);
   }, [load]);
 
   useEffect(() => {
@@ -108,7 +98,7 @@ const Users: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [editingUsernameId]);
 
-  const reload = () => token && void load(token, page);
+  const reload = () => void load(page);
 
   const openCreate = () => {
     setEditing(undefined);
@@ -124,38 +114,32 @@ const Users: React.FC = () => {
   };
 
   const save = async (values: UserFormValues) => {
-    if (!token) return;
     const payload = editing
       ? { username: values.username.trim(), role: values.role }
       : { username: values.username.trim(), email: values.email.trim(), password: values.password, role: values.role };
     try {
-      const response = await fetch(buildApiUrl(editing ? `/admin/users/${editing.id}` : '/admin/users'), {
+      const result = await apiService.request<ApiResponse<any>>(editing ? `/admin/users/${editing.id}` : '/admin/users', {
         method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
-      const result = await response.json();
-      if (!response.ok || (result.code !== 200 && result.code !== 201)) throw new Error(result.message || '保存用户失败');
+      if (result.code !== 200 && result.code !== 201) throw new Error(result.message || '保存用户失败');
       message.success(editing ? '用户已更新' : '用户已创建');
       setFormVisible(false);
-      await load(token, page);
+      await load(page);
     } catch (error) {
       message.error(mapApiError(error, '保存用户失败'));
     }
   };
 
   const toggleEnabled = async (user: ManagedUser, enabled: boolean) => {
-    if (!token) return;
     setSavingEnabled(user.id);
     try {
-      const response = await fetch(buildApiUrl(`/admin/users/${user.id}/enabled`), {
+      const result = await apiService.request<ApiResponse<any>>(`/admin/users/${user.id}/enabled`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ enabled }),
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) throw new Error(result.message || '更新用户状态失败');
-      await load(token, page);
+      if (result.code !== 200) throw new Error(result.message || '更新用户状态失败');
+      await load(page);
     } catch (error) {
       message.error(mapApiError(error, '更新用户状态失败'));
     } finally {
@@ -164,7 +148,6 @@ const Users: React.FC = () => {
   };
 
   const remove = (user: ManagedUser) => {
-    if (!token) return;
     Modal.confirm({
       title: '删除用户',
       content: `确定删除 ${user.email}？该用户的打印任务会一并删除，上传文件不会删除。`,
@@ -174,14 +157,12 @@ const Users: React.FC = () => {
       onOk: async () => {
         setDeleting(user.id);
         try {
-          const response = await fetch(buildApiUrl(`/admin/users/${user.id}`), {
+          const result = await apiService.request<ApiResponse<any>>(`/admin/users/${user.id}`, {
             method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` },
           });
-          const result = await response.json();
-          if (!response.ok || result.code !== 200) throw new Error(result.message || '删除用户失败');
+          if (result.code !== 200) throw new Error(result.message || '删除用户失败');
           message.success('用户已删除');
-          await load(token, page);
+          await load(page);
         } catch (error) {
           message.error(mapApiError(error, '删除用户失败'));
         } finally {
@@ -193,20 +174,18 @@ const Users: React.FC = () => {
 
   const saveUsername = async (user: ManagedUser) => {
     const nextUsername = usernameDraft.trim();
-    if (!token || !nextUsername || nextUsername === user.username) {
+    if (!nextUsername || nextUsername === user.username) {
       setEditingUsernameId(undefined);
       return;
     }
     try {
-      const response = await fetch(buildApiUrl(`/admin/users/${user.id}`), {
+      const result = await apiService.request<ApiResponse<any>>(`/admin/users/${user.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ username: nextUsername, role: user.role }),
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) throw new Error(result.message || '更新用户名失败');
+      if (result.code !== 200) throw new Error(result.message || '更新用户名失败');
       setEditingUsernameId(undefined);
-      await load(token, page);
+      await load(page);
     } catch (error) {
       message.error(mapApiError(error, '更新用户名失败'));
     }
@@ -278,7 +257,7 @@ const Users: React.FC = () => {
         <Select allowClear value={role} placeholder="角色" options={roleOptions} onChange={setRole} style={{ width: 140 }} />
         <Select allowClear value={status} placeholder="状态" options={[{ value: 'active', label: '启用' }, { value: 'inactive', label: '停用' }]} onChange={setStatus} style={{ width: 120 }} />
       </Space>
-      <Table rowKey="id" loading={loading} dataSource={users} columns={columns} onChange={handleTableChange} pagination={{ current: page, total, pageSize, showSizeChanger: true, onChange: (nextPage, nextPageSize) => { setPageSize(nextPageSize); if (token) void load(token, nextPage); } }} scroll={{ x: 1250 }} />
+      <Table rowKey="id" loading={loading} dataSource={users} columns={columns} onChange={handleTableChange} pagination={{ current: page, total, pageSize, showSizeChanger: true, onChange: (nextPage, nextPageSize) => { setPageSize(nextPageSize); void load(nextPage); } }} scroll={{ x: 1250 }} />
 
       <Drawer title="用户详情" open={!!detailUser} onClose={() => setDetailUser(null)} width={440}>
         {detailUser ? <Descriptions column={1} size="small" bordered>
@@ -303,11 +282,10 @@ const Users: React.FC = () => {
 
       <Modal open={passwordVisible} title={`修改密码：${passwordUser?.email || ''}`} onCancel={() => setPasswordVisible(false)} onOk={() => passwordForm.submit()} destroyOnClose okText="保存" cancelText="取消">
         <Form form={passwordForm} layout="vertical" onFinish={async (values) => {
-          if (!token || !passwordUser) return;
+          if (!passwordUser) return;
           try {
-            const response = await fetch(buildApiUrl(`/admin/users/${passwordUser.id}/password`), { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(values) });
-            const result = await response.json();
-            if (!response.ok || result.code !== 200) throw new Error(result.message || '修改密码失败');
+            const result = await apiService.request<ApiResponse<any>>(`/admin/users/${passwordUser.id}/password`, { method: 'PUT', body: JSON.stringify(values) });
+            if (result.code !== 200) throw new Error(result.message || '修改密码失败');
             message.success('密码已修改'); setPasswordVisible(false); passwordForm.resetFields();
           } catch (error) { message.error(mapApiError(error, '修改密码失败')); }
         }}>
@@ -317,20 +295,18 @@ const Users: React.FC = () => {
 
       <Modal open={quotaVisible} title={`增加打印额度：${quotaUser?.email || ''}`} onCancel={() => setQuotaVisible(false)} onOk={() => quotaForm.submit()} destroyOnClose okText="确认增加" cancelText="取消">
         <Form form={quotaForm} layout="vertical" onFinish={async (values) => {
-          if (!token || !quotaUser) return;
+          if (!quotaUser) return;
           const payload = { amount: Number(values.amount), reason: values.reason.trim() };
           try {
-            const response = await fetch(buildApiUrl(`/admin/users/${quotaUser.id}/print-quota-grants`), {
+            const result = await apiService.request<ApiResponse<any>>(`/admin/users/${quotaUser.id}/print-quota-grants`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
               body: JSON.stringify(payload),
             });
-            const result = await response.json();
-            if (!response.ok || result.code !== 200) throw new Error(result.message || '增加打印额度失败');
+            if (result.code !== 200) throw new Error(result.message || '增加打印额度失败');
             message.success('打印额度已增加');
             setQuotaVisible(false);
             quotaForm.resetFields();
-            await load(token, page);
+            await load(page);
           } catch (error) {
             message.error(mapApiError(error, '增加打印额度失败'));
           }

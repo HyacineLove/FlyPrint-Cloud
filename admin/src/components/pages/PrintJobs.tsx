@@ -3,7 +3,7 @@ import { Button, Card, Descriptions, Drawer, Input, Select, Space, Table, Tag, m
 import type { ColumnsType } from 'antd/es/table';
 import { EyeOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
 import { DateTimeValue, EntityCell, FullIdentifier } from '../DisplayValue';
 
 interface PrintJob {
@@ -17,18 +17,15 @@ interface PrintJob {
 }
 
 async function listJobs(page: number, filters: {
-  edgeNodeId?: string; printerId?: string; initiatorCode?: string; userEmail?: string; status?: string; keyword?: string;
+  edgeNodeId?: string; printerId?: string; initiatorCode?: string; userEmail?: string; status?: string;
 }) {
-  const me = await fetch(buildAuthUrl('me')); const token = (await me.json())?.data?.access_token;
-  const query = new URLSearchParams({ page: String(page), pageSize: '20' });
+  const query = new URLSearchParams({ page: String(page), page_size: '20' });
   if (filters.edgeNodeId) query.set('edge_node_id', filters.edgeNodeId);
   if (filters.printerId) query.set('printer_id', filters.printerId);
   if (filters.initiatorCode) query.set('initiator_code', filters.initiatorCode);
   if (filters.userEmail) query.set('user_email', filters.userEmail);
   if (filters.status) query.set('status', filters.status);
-  const response = await fetch(buildApiUrl(`/admin/print-jobs?${query}`), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  return apiService.request<{ jobs: PrintJob[]; pagination?: { total?: number } }>(`/admin/print-jobs?${query}`);
 }
 
 const result = (job: PrintJob) => {
@@ -83,8 +80,8 @@ const PrintJobs: React.FC = () => {
   }, [page, edgeNodeFilter, printerFilter, initiatorFilter, userEmailFilter, statusFilter, keyword]);
 
   useEffect(() => { load(1); }, [edgeNodeFilter, printerFilter, initiatorFilter, userEmailFilter, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 打印任务通常在几十秒内完成；30 秒轮询会让 processing 状态经常被直接跳过。
-  useEffect(() => { const timer = window.setInterval(() => { if (!document.hidden) load(); }, 5000); return () => window.clearInterval(timer); }, [load]);
+  // 打印任务通常在几十秒内完成；先使用 10 秒轮询，降低状态请求频率。
+  useEffect(() => { const timer = window.setInterval(() => { if (!document.hidden) load(); }, 10000); return () => window.clearInterval(timer); }, [load]);
   const terminal = (status: string) => ['completed', 'failed', 'cancelled', 'canceled', 'unconfirmed'].includes(status);
 
   const columns: ColumnsType<PrintJob> = [

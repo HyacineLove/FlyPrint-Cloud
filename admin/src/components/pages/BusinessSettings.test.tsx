@@ -3,6 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { message } from 'antd';
 import BusinessSettings from './BusinessSettings';
+import { apiService } from '../../services/api';
 
 const authResponse = {
   code: 200,
@@ -25,6 +26,7 @@ const settingsResponse = {
 
 describe('BusinessSettings', () => {
   beforeEach(() => {
+    apiService.clearToken();
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: jest.fn().mockImplementation((query) => ({

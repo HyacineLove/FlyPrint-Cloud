@@ -10,6 +10,8 @@ jest.mock('../../services/api', () => ({
   apiService: {
     getToken: jest.fn().mockResolvedValue('test-user-token'),
     clearToken: jest.fn(),
+    get: jest.fn(),
+    request: jest.fn(),
     uploadFile: jest.fn(),
   },
 }));
@@ -32,6 +34,14 @@ describe('PublicUpload', () => {
     jest.useFakeTimers();
     jest.clearAllMocks();
     mockedApiService.getToken.mockResolvedValue('test-user-token');
+    mockedApiService.get.mockImplementation(async (endpoint: string) => {
+      const response = await fetch(`/api/v1${endpoint}`);
+      return response.json();
+    });
+    mockedApiService.request.mockImplementation(async (endpoint: string, options?: RequestInit) => {
+      const response = await fetch(`/api/v1${endpoint}`, options);
+      return response.json();
+    });
     jest.spyOn(message, 'open').mockImplementation(() => ({}) as any);
   });
 

@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Card, Col, Form, Input, InputNumber, Row, message } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
 
 interface BusinessSettingsPayload {
@@ -33,11 +33,10 @@ const parseExtensions = (value: string): string[] =>
 
 const BusinessSettings: React.FC = () => {
   const [form] = Form.useForm<BusinessSettingsFormValues>();
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const applySettings = (settings: BusinessSettingsPayload) => {
+  const applySettings = useCallback((settings: BusinessSettingsPayload) => {
     form.setFieldsValue({
       upload_size_mb: bytesToMegabytes(settings.upload_max_size_bytes),
       max_document_pages: settings.max_document_pages,
@@ -46,21 +45,13 @@ const BusinessSettings: React.FC = () => {
       allowed_extensions: settings.allowed_extensions.join(', '),
       max_contacts_per_node: settings.max_contacts_per_node ?? 5,
     });
-  };
+  }, [form]);
 
-  const loadSettings = async (accessToken?: string) => {
-    const effectiveToken = accessToken || token;
-    if (!effectiveToken) {
-      return;
-    }
-
+  const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(buildApiUrl('/admin/business-settings'), {
-        headers: { Authorization: `Bearer ${effectiveToken}` },
-      });
-      const result = await response.json();
-      if (response.ok && result.code === 200 && result.data) {
+      const result = await apiService.get<BusinessSettingsPayload>('/admin/business-settings');
+      if (result.code === 200 && result.data) {
         applySettings(result.data);
       } else {
         message.error(mapApiError(result, '加载业务配置失败'));
@@ -70,37 +61,13 @@ const BusinessSettings: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [applySettings]);
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        const response = await fetch(buildAuthUrl('me'));
-        const result = await response.json();
-        if (result.code === 200 && result.data?.access_token) {
-          const accessToken = result.data.access_token;
-          setToken(accessToken);
-          await loadSettings(accessToken);
-        } else {
-          message.error('获取登录状态失败');
-        }
-      } catch {
-        message.error('网络错误');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void loadSettings();
+  }, [loadSettings]);
 
   const saveSettings = async (values: BusinessSettingsFormValues) => {
-    if (!token) {
-      message.error('缺少访问凭证');
-      return;
-    }
-
     setSaving(true);
     try {
       const payload: BusinessSettingsPayload = {
@@ -112,16 +79,8 @@ const BusinessSettings: React.FC = () => {
         max_contacts_per_node: values.max_contacts_per_node,
       };
 
-      const response = await fetch(buildApiUrl('/admin/business-settings'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json();
-      if (response.ok && result.code === 200 && result.data) {
+      const result = await apiService.put<BusinessSettingsPayload>('/admin/business-settings', payload);
+      if (result.code === 200 && result.data) {
         applySettings(result.data);
         message.success('业务配置已更新');
       } else {

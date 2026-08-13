@@ -3,7 +3,7 @@ import * as echarts from 'echarts';
 import { Card, Col, Collapse, Empty, Row, Segmented, Space, Table, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { CloudServerOutlined, FileTextOutlined, PrinterOutlined } from '@ant-design/icons';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
 import { DateTimeValue, TwoLineLink, TwoLineValue } from '../DisplayValue';
 
 interface TrendBucket { label: string; completed: number; failed: number; }
@@ -21,11 +21,8 @@ const emptyOverview: Overview = { fault_nodes: 0, online_nodes: 0, total_nodes: 
 const emptyAlerts: AlertPage = { items: [], total: 0, page: 1, page_size: 10 };
 
 async function api(path: string) {
-  const auth = await fetch(buildAuthUrl('me'));
-  const token = (await auth.json())?.data?.access_token;
-  const response = await fetch(buildApiUrl(path), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json())?.data || {};
+  const response = await apiService.get<any>(path);
+  return response.data || {};
 }
 
 const axisLabel = (period: string, label: string) => {
@@ -77,8 +74,6 @@ const StateCard: React.FC<{ icon: React.ReactNode; title: string; fault: number;
 const Dashboard: React.FC = () => {
   const [period, setPeriod] = useState<'day' | 'month' | 'year'>('day');
   const [trends, setTrends] = useState<TrendBucket[]>([]);
-  const [taskPeriod, setTaskPeriod] = useState<'day' | 'month' | 'year'>('day');
-  const [taskTrends, setTaskTrends] = useState<TrendBucket[]>([]);
   const [maintenance, setMaintenance] = useState<Maintenance>({ ...emptyAlerts, page_size: 20, summary: emptyOverview });
   const [history, setHistory] = useState<AlertPage>(emptyAlerts);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -100,18 +95,17 @@ const Dashboard: React.FC = () => {
   }, []);
 
   useEffect(() => { setLoading(true); loadCurrent().catch(() => message.error('仪表盘加载失败')).finally(() => setLoading(false)); }, [loadCurrent]);
-  useEffect(() => { api(`/admin/dashboard/trends?period=${taskPeriod}`).then(data => setTaskTrends(data.buckets || [])).catch(() => message.error('打印任务汇总加载失败')); }, [taskPeriod]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (!document.hidden) {
         loadCurrent().catch(() => undefined);
-        api(`/admin/dashboard/trends?period=${taskPeriod}`).then(data => setTaskTrends(data.buckets || [])).catch(() => undefined);
       }
     }, 30000);
     return () => window.clearInterval(timer);
-  }, [loadCurrent, taskPeriod]);
+  }, [loadCurrent]);
 
-  const taskSummary = taskTrends.reduce((summary, item) => ({ completed: summary.completed + item.completed, failed: summary.failed + item.failed }), { completed: 0, failed: 0 });
+  const taskSummary = trends.reduce((summary, item) => ({ completed: summary.completed + item.completed, failed: summary.failed + item.failed }), { completed: 0, failed: 0 });
+  const periodLabel = period === 'day' ? '当天' : period === 'month' ? '本月' : '本年';
   const currentColumns: ColumnsType<AlertRecord> = [
     { title: '节点', key: 'node', width: 220, render: (_, row) => nodeCell(row.node_id || (row.resource_type === 'node' ? row.resource_id : undefined), row.node_name) },
     { title: '打印机', key: 'printer', width: 220, render: (_, row) => printerCell(row.printer_id || (row.resource_type === 'printer' ? row.resource_id : undefined), row.printer_name) },
@@ -125,10 +119,10 @@ const Dashboard: React.FC = () => {
   return <Space direction="vertical" size={16} style={{ width: '100%' }}>
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={17}><Card style={{ height: '100%' }} extra={<Segmented value={period} onChange={value => setPeriod(value as typeof period)} options={[{ label: '当天', value: 'day' }, { label: '本月', value: 'month' }, { label: '本年', value: 'year' }]} />} loading={loading}><TrendChart buckets={trends} period={period} /></Card></Col>
-      <Col xs={24} lg={7}><Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <StateCard icon={<CloudServerOutlined />} title="节点状态" fault={maintenance.summary.fault_nodes} online={maintenance.summary.online_nodes} total={maintenance.summary.total_nodes} />
-        <StateCard icon={<PrinterOutlined />} title="打印机状态" fault={maintenance.summary.fault_printers} online={maintenance.summary.online_printers} total={maintenance.summary.total_printers} />
-        <Card size="small"><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}><Space align="center"><FileTextOutlined /><Typography.Text strong style={{ fontSize: 16 }}>打印任务汇总</Typography.Text></Space><Segmented size="small" value={taskPeriod} onChange={value => setTaskPeriod(value as typeof taskPeriod)} options={[{ label: '当天', value: 'day' }, { label: '本月', value: 'month' }, { label: '本年', value: 'year' }]} /></div><Row gutter={8}><Col span={8}><div style={{ color: '#cf1322', fontSize: 22, fontWeight: 600 }}>{taskSummary.failed}</div><Typography.Text type="secondary">失败</Typography.Text></Col><Col span={8}><div style={{ color: '#389e0d', fontSize: 22, fontWeight: 600 }}>{taskSummary.completed}</div><Typography.Text type="secondary">成功</Typography.Text></Col><Col span={8}><div style={{ fontSize: 22, fontWeight: 600 }}>{taskSummary.failed + taskSummary.completed}</div><Typography.Text type="secondary">总数</Typography.Text></Col></Row></Card>
+       <Col xs={24} lg={7}><Space direction="vertical" size={16} style={{ width: '100%' }}>
+         <StateCard icon={<CloudServerOutlined />} title="节点状态" fault={maintenance.summary.fault_nodes} online={maintenance.summary.online_nodes} total={maintenance.summary.total_nodes} />
+         <StateCard icon={<PrinterOutlined />} title="打印机状态" fault={maintenance.summary.fault_printers} online={maintenance.summary.online_printers} total={maintenance.summary.total_printers} />
+         <Card size="small"><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}><Space align="center"><FileTextOutlined /><Typography.Text strong style={{ fontSize: 16 }}>打印任务汇总</Typography.Text></Space><Typography.Text type="secondary">{periodLabel}</Typography.Text></div><Row gutter={8}><Col span={8}><div style={{ color: taskSummary.failed > 0 ? '#cf1322' : '#8c8c8c', fontSize: 22, fontWeight: 600 }}>{taskSummary.failed}</div><Typography.Text type="secondary">失败</Typography.Text></Col><Col span={8}><div style={{ color: '#389e0d', fontSize: 22, fontWeight: 600 }}>{taskSummary.completed}</div><Typography.Text type="secondary">成功</Typography.Text></Col><Col span={8}><div style={{ fontSize: 22, fontWeight: 600 }}>{taskSummary.failed + taskSummary.completed}</div><Typography.Text type="secondary">总数</Typography.Text></Col></Row></Card>
       </Space></Col>
     </Row>
     <Card title="当前告警"><Table rowKey="id" loading={loading} dataSource={maintenance.items} columns={currentColumns} pagination={pagination(maintenance, page => loadCurrent(page).catch(() => message.error('告警加载失败')))} locale={{ emptyText: <Empty description="暂无当前告警" /> }} /></Card>

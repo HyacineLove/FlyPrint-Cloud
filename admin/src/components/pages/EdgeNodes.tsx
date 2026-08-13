@@ -3,7 +3,8 @@ import { Button, Card, Checkbox, Descriptions, Drawer, Input, Modal, Select, Spa
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, EyeOutlined, FileTextOutlined, PlusOutlined, PrinterOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
+import type { ApiResponse } from '../../services/api';
 import { DateTimeValue, EntityCell, FullIdentifier } from '../DisplayValue';
 import { RelationStack } from '../RelationLinks';
 
@@ -26,14 +27,8 @@ interface PortalConfig {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const me = await fetch(buildAuthUrl('me'));
-  const token = (await me.json())?.data?.access_token;
-  const response = await fetch(buildApiUrl(path), {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers || {}) },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.message || body.error || `HTTP ${response.status}`);
+  const body = await apiService.request<ApiResponse<any>>(path, init);
+  if (body.code !== 200 && body.code !== 201) throw new Error(body.message || '请求失败');
   return body.data;
 }
 
@@ -60,21 +55,13 @@ const EdgeNodes: React.FC = () => {
   const [connectionFilter, setConnectionFilter] = useState<string | undefined>();
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>();
   const [detailNode, setDetailNode] = useState<EdgeNode | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [nodeData, portalData] = await Promise.all([
-        request('/admin/edge-nodes?page=1&page_size=100'),
-        request('/admin/site-portals'),
-      ]);
+      const nodeData = await request('/admin/edge-nodes?page=1&page_size=100');
       const loadedNodes: EdgeNode[] = nodeData?.items || [];
-      const loadedConfigs = await Promise.all(loadedNodes.map(async node => [
-        node.id,
-        await request(`/admin/edge-nodes/${encodeURIComponent(node.id)}/site-portals`),
-      ] as const));
       setNodes(loadedNodes);
-      setSitePortals(portalData || []);
-      setPortalConfigs(Object.fromEntries(loadedConfigs));
     }
     catch { message.error('节点信息加载失败'); }
     finally { setLoading(false); }
@@ -118,12 +105,28 @@ const EdgeNodes: React.FC = () => {
     setPortalConfigNode(node);
     setPortalConfigLoading(true);
     try {
-      const data = portalConfigs[node.id] || await request(`/admin/edge-nodes/${encodeURIComponent(node.id)}/site-portals`);
+      const [data, portalData] = await Promise.all([
+        portalConfigs[node.id] || request(`/admin/edge-nodes/${encodeURIComponent(node.id)}/site-portals`),
+        sitePortals.length > 0 ? Promise.resolve(sitePortals) : request('/admin/site-portals'),
+      ]);
+      setPortalConfigs(current => ({ ...current, [node.id]: data }));
+      if (sitePortals.length === 0) setSitePortals(portalData || []);
       const configuredCodes = (data?.portals || []).map((portal: SitePortal) => portal.code);
       setPortalConfigCodes(configuredCodes);
       setPortalConfigDefault(data?.default_code || '');
     } catch { message.error('Site Portal 配置加载失败'); setPortalConfigNode(null); }
     finally { setPortalConfigLoading(false); }
+  };
+  const openDetail = async (node: EdgeNode) => {
+    setDetailNode(node);
+    const cachedConfig = portalConfigs[node.id];
+    setDetailLoading(!cachedConfig);
+    if (cachedConfig) return;
+    try {
+      const data = await request(`/admin/edge-nodes/${encodeURIComponent(node.id)}/site-portals`);
+      setPortalConfigs(current => ({ ...current, [node.id]: data }));
+    } catch { message.error('Site Portal 配置加载失败'); }
+    finally { setDetailLoading(false); }
   };
   const savePortalConfig = async () => {
     if (!portalConfigNode) return;
@@ -188,7 +191,7 @@ const EdgeNodes: React.FC = () => {
       ),
     },
     { title: '节点启用状态', width: 105, render: (_, node) => <Switch checked={node.enabled} disabled={node.registration_state === 'pending_activation'} onChange={value => toggle(node, value)} /> },
-    { title: '操作', width: 170, render: (_, node) => <Space size="small"><Button type="link" icon={<EyeOutlined />} onClick={() => setDetailNode(node)}>详情</Button><Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(node)} /></Space> },
+    { title: '操作', width: 170, render: (_, node) => <Space size="small"><Button type="link" icon={<EyeOutlined />} onClick={() => void openDetail(node)}>详情</Button><Button danger type="primary" icon={<DeleteOutlined />} onClick={() => remove(node)} /></Space> },
   ];
 
   return <div>
@@ -218,7 +221,7 @@ const EdgeNodes: React.FC = () => {
         <Descriptions.Item label="注册状态">{detailNode.registration_state || '-'}</Descriptions.Item>
         <Descriptions.Item label="最后心跳"><DateTimeValue value={detailNode.last_heartbeat} /></Descriptions.Item>
         <Descriptions.Item label="节点版本">{detailNode.version || '-'}</Descriptions.Item>
-        <Descriptions.Item label="Site Portal">{portalConfigs[detailNode.id]?.portals?.length ?? 0} 个入口{portalConfigs[detailNode.id]?.default_code ? `，默认：${portalConfigs[detailNode.id].default_code}` : ''}</Descriptions.Item>
+        <Descriptions.Item label="Site Portal">{detailLoading ? '加载中…' : `${portalConfigs[detailNode.id]?.portals?.length ?? 0} 个入口${portalConfigs[detailNode.id]?.default_code ? `，默认：${portalConfigs[detailNode.id].default_code}` : ''}`}</Descriptions.Item>
         <Descriptions.Item label="节点 ID"><FullIdentifier value={detailNode.id} /></Descriptions.Item>
       </Descriptions> : null}
     </Drawer>

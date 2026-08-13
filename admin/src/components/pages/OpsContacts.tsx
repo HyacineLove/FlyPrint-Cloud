@@ -3,7 +3,8 @@ import { Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, m
 import { EditOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
+import type { ApiResponse } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
 
 interface OpsContact {
@@ -33,7 +34,6 @@ const OpsContacts: React.FC = () => {
   const nodeFilter = searchParams.get('node_id') || '';
   const [contacts, setContacts] = useState<OpsContact[]>([]);
   const [nodes, setNodes] = useState<EdgeNodeOption[]>([]);
-  const [token, setToken] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<OpsContact | undefined>();
   const [formVisible, setFormVisible] = useState(false);
@@ -44,7 +44,7 @@ const OpsContacts: React.FC = () => {
     return (id: string) => map[id] || id;
   }, [nodes]);
 
-  const load = useCallback(async (accessToken: string) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const query = new URLSearchParams({ page: '1', page_size: '100' });
@@ -52,19 +52,11 @@ const OpsContacts: React.FC = () => {
         query.set('node_id', nodeFilter);
       }
       const [contactsResponse, nodesResponse] = await Promise.all([
-        fetch(buildApiUrl(`/admin/ops-contacts?${query}`), { headers: { Authorization: `Bearer ${accessToken}` } }),
-        fetch(buildApiUrl('/admin/edge-nodes?page=1&page_size=100'), { headers: { Authorization: `Bearer ${accessToken}` } }),
+        apiService.get<{ items: OpsContact[] }>(`/admin/ops-contacts?${query}`),
+        apiService.get<{ items: EdgeNodeOption[] }>('/admin/edge-nodes?page=1&page_size=100'),
       ]);
-      const contactsResult = await contactsResponse.json();
-      const nodesResult = await nodesResponse.json();
-      if (!contactsResponse.ok || contactsResult.code !== 200) {
-        throw new Error(contactsResult.message || '加载运维人员失败');
-      }
-      if (!nodesResponse.ok || nodesResult.code !== 200) {
-        throw new Error(nodesResult.message || '加载节点失败');
-      }
-      setContacts(contactsResult.data?.items || []);
-      setNodes(nodesResult.data?.items || []);
+      setContacts(contactsResponse.data?.items || []);
+      setNodes(nodesResponse.data?.items || []);
     } catch (error) {
       message.error(mapApiError(error, '加载运维人员失败'));
     } finally {
@@ -73,19 +65,7 @@ const OpsContacts: React.FC = () => {
   }, [nodeFilter]);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const response = await fetch(buildAuthUrl('me'));
-        const result = await response.json();
-        const accessToken = result.data?.access_token;
-        if (response.ok && result.code === 200 && accessToken) {
-          setToken(accessToken);
-          await load(accessToken);
-        }
-      } finally {
-        setLoading(false);
-      }
-    })();
+    void load();
   }, [load]);
 
   const openCreate = () => {
@@ -106,7 +86,6 @@ const OpsContacts: React.FC = () => {
   };
 
   const save = async (values: ContactForm) => {
-    if (!token) return;
     const payload = {
       name: values.name.trim(),
       phone: values.phone.trim(),
@@ -114,57 +93,40 @@ const OpsContacts: React.FC = () => {
       node_ids: values.node_ids || [],
     };
     try {
-      const response = await fetch(
-        buildApiUrl(editing ? `/admin/ops-contacts/${editing.id}` : '/admin/ops-contacts'),
-        {
-          method: editing ? 'PUT' : 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(payload),
-        },
+      const result = await apiService.request<ApiResponse<any>>(
+        editing ? `/admin/ops-contacts/${editing.id}` : '/admin/ops-contacts',
+        { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) },
       );
-      const result = await response.json();
-      if (!response.ok || (result.code !== 200 && result.code !== 201)) {
-        throw new Error(result.message || '保存失败');
-      }
+      if (result.code !== 200 && result.code !== 201) throw new Error(result.message || '保存失败');
       message.success(editing ? '运维人员已更新' : '运维人员已创建');
       setFormVisible(false);
-      await load(token);
+      await load();
     } catch (error) {
       message.error(mapApiError(error, '保存运维人员失败'));
     }
   };
 
   const toggleEnabled = async (contact: OpsContact, enabled: boolean) => {
-    if (!token) return;
     try {
-      const response = await fetch(buildApiUrl(`/admin/ops-contacts/${contact.id}/enabled`), {
+      const result = await apiService.request<ApiResponse<any>>(`/admin/ops-contacts/${contact.id}/enabled`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ enabled }),
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) {
-        throw new Error(result.message || '更新失败');
-      }
-      await load(token);
+      if (result.code !== 200) throw new Error(result.message || '更新失败');
+      await load();
     } catch (error) {
       message.error(mapApiError(error, '更新启用状态失败'));
     }
   };
 
   const remove = async (contact: OpsContact) => {
-    if (!token) return;
     try {
-      const response = await fetch(buildApiUrl(`/admin/ops-contacts/${contact.id}`), {
+      const result = await apiService.request<ApiResponse<any>>(`/admin/ops-contacts/${contact.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) {
-        throw new Error(result.message || '删除失败');
-      }
+      if (result.code !== 200) throw new Error(result.message || '删除失败');
       message.success('运维人员已删除');
-      await load(token);
+      await load();
     } catch (error) {
       message.error(mapApiError(error, '删除失败'));
     }

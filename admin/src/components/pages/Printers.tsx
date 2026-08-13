@@ -3,7 +3,8 @@ import { Button, Card, Descriptions, Drawer, Input, Modal, Select, Space, Switch
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, EyeOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
+import type { ApiResponse } from '../../services/api';
 import { EntityCell, FullIdentifier, TwoLineLink } from '../DisplayValue';
 import { RelationStack } from '../RelationLinks';
 
@@ -34,10 +35,9 @@ export const PRINTER_STATUS_META: Record<string, { color: string; label: string 
 export const printerStatusLabel = (value: string) => PRINTER_STATUS_META[value]?.label || '未知状态';
 
 async function request(path: string, init?: RequestInit) {
-  const me = await fetch(buildAuthUrl('me')); const token = (await me.json())?.data?.access_token;
-  const response = await fetch(buildApiUrl(path), { ...init, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers || {}) } });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json())?.data;
+  const body = await apiService.request<ApiResponse<any>>(path, init);
+  if (body.code !== 200 && body.code !== 201) throw new Error(body.message || '请求失败');
+  return body.data;
 }
 
 const stateTag = (value: string) => {

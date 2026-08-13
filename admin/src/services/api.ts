@@ -25,16 +25,77 @@ export class ApiError extends Error {
   }
 }
 
+async function readJsonResponse(response: Response): Promise<any> {
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { message: text };
+    }
+  }
+  if (typeof response.json === 'function') {
+    return response.json();
+  }
+  return {};
+}
+
 class ApiService {
   private token: string | null = null;
+  private currentUser: ApiResponse<any> | null = null;
+  private currentUserRequest: Promise<ApiResponse<any>> | null = null;
+  private authGeneration = 0;
 
   // 设置认证 token
   setToken(token: string) {
+    this.authGeneration += 1;
     this.token = token;
+    this.currentUser = null;
   }
 
   clearToken() {
+    this.authGeneration += 1;
     this.token = null;
+    this.currentUser = null;
+  }
+
+  async getMe(): Promise<ApiResponse<any>> {
+    if (this.currentUser) {
+      return this.currentUser;
+    }
+    if (this.currentUserRequest) {
+      return this.currentUserRequest;
+    }
+
+    const requestGeneration = this.authGeneration;
+    this.currentUserRequest = (async () => {
+      const response = await fetch(buildAuthUrl('me'));
+      const result: ApiResponse<any> = await readJsonResponse(response);
+
+      if (requestGeneration !== this.authGeneration) {
+        throw new ApiError({ code: 401, message: '登录状态已变更' });
+      }
+
+      if (!response.ok) {
+        this.clearToken();
+        throw new ApiError({
+          code: response.status,
+          message: result.message || '获取登录状态失败',
+          details: result,
+        });
+      }
+
+      this.currentUser = result;
+      if (result.data?.access_token) {
+        this.token = result.data.access_token;
+      }
+      return result;
+    })().finally(() => {
+      this.currentUserRequest = null;
+    });
+
+    return this.currentUserRequest;
   }
 
   // 获取认证 token
@@ -44,13 +105,8 @@ class ApiService {
     }
 
     try {
-      const response = await fetch(buildAuthUrl('me'));
-      const result = await response.json();
-      
-      if (result.code === 200 && result.data.access_token) {
-        this.token = result.data.access_token;
-        return this.token;
-      }
+      const result = await this.getMe();
+      return result.code === 200 ? result.data?.access_token || null : null;
     } catch (error) {
       console.error('获取 token 失败:', error);
     }
@@ -59,27 +115,35 @@ class ApiService {
   }
 
   // 通用请求方法
-  private async request<T = any>(
+  async request<T = any>(
     endpoint: string,
     options: RequestInit = {}
-  ): Promise<ApiResponse<T>> {
+  ): Promise<T> {
     const token = await this.getToken();
-    
+
+    const headers = new Headers(options.headers);
+    if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+
     const config: RequestInit = {
-      headers: {
-        // 如果 body 是 FormData，不要设置 Content-Type，让浏览器自动处理
-        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(token && { 'Authorization': `Bearer ${token}` }),
-        ...options.headers,
-      },
       ...options,
+      headers: {
+        ...Object.fromEntries(headers.entries()),
+      },
     };
 
     try {
       const response = await fetch(buildApiUrl(endpoint), config);
-      const result = await response.json();
+      const result = await readJsonResponse(response);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          this.clearToken();
+        }
         throw new ApiError({
           code: response.status,
           message: result.message || '请求失败',
@@ -87,7 +151,7 @@ class ApiService {
         });
       }
 
-      return result;
+      return result as T;
     } catch (error) {
       if (error instanceof ApiError) {
         throw error;
@@ -102,28 +166,35 @@ class ApiService {
 
   // GET 请求
   async get<T = any>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'GET' });
+    return this.request<ApiResponse<T>>(endpoint, { method: 'GET' });
   }
 
   // POST 请求
   async post<T = any>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
+    return this.request<ApiResponse<T>>(endpoint, {
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
+      body: data === undefined ? undefined : JSON.stringify(data),
     });
   }
 
   // PUT 请求
   async put<T = any>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
+    return this.request<ApiResponse<T>>(endpoint, {
       method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
+      body: data === undefined ? undefined : JSON.stringify(data),
+    });
+  }
+
+  async patch<T = any>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
+    return this.request<ApiResponse<T>>(endpoint, {
+      method: 'PATCH',
+      body: data === undefined ? undefined : JSON.stringify(data),
     });
   }
 
   // DELETE 请求
   async delete<T = any>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+    return this.request<ApiResponse<T>>(endpoint, { method: 'DELETE' });
   }
 
   // 文件上传
@@ -137,40 +208,14 @@ class ApiService {
     formData.append('file', file);
     
     try {
-      // 官方终端上传同时携带 terminal token 与官方账号 JWT。
-      if (uploadToken) {
-        const authToken = await this.getToken();
-        const response = await fetch(buildApiUrl('/files'), {
-          method: 'POST',
-          headers: {
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-            'X-Fly-Print-File-Token': uploadToken,
-            ...(nodeId ? { 'X-Fly-Print-Node-ID': nodeId } : {}),
-            ...(printerId ? { 'X-Fly-Print-Printer-ID': printerId } : {}),
-          },
-          body: formData,
-        });
-        
-        const result = await response.json();
-        
-        if (!response.ok) {
-          throw new ApiError({
-            code: response.status,
-            message: result.message || '请求失败',
-            details: result,
-          });
-        }
-        
-        return result;
-      }
-      
-      // 否则使用 OAuth2 认证
-      let endpoint = '/files';
-      if (nodeId) {
-        endpoint += `?node_id=${nodeId}`;
-      }
-      return await this.request(endpoint, {
+      const endpoint = uploadToken ? '/files' : nodeId ? `/files?node_id=${encodeURIComponent(nodeId)}` : '/files';
+      return await this.request<ApiResponse<any>>(endpoint, {
         method: 'POST',
+        headers: {
+          ...(uploadToken ? { 'X-Fly-Print-File-Token': uploadToken } : {}),
+          ...(nodeId ? { 'X-Fly-Print-Node-ID': nodeId } : {}),
+          ...(printerId ? { 'X-Fly-Print-Printer-ID': printerId } : {}),
+        },
         body: formData,
       });
     } catch (error) {
@@ -190,21 +235,11 @@ class ApiService {
     formData.append('file', file);
 
     try {
-      const response = await fetch(buildApiUrl('/files/preflight'), {
+      const result = await this.request<ApiResponse<any>>('/files/preflight', {
         method: 'POST',
         headers: uploadToken ? { 'X-Fly-Print-File-Token': uploadToken } : undefined,
         body: formData,
       });
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new ApiError({
-          code: response.status,
-          message: result.message || '请求失败',
-          details: result,
-        });
-      }
-
       return result;
     } catch (error) {
       if (error instanceof ApiError) {

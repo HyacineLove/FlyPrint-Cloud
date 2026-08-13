@@ -31,6 +31,7 @@ import Users from './components/pages/Users';
 import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 import { buildAuthUrl, buildAppPath, APP_BASENAME } from './config';
+import { apiService } from './services/api';
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -68,15 +69,7 @@ const AdminApp: React.FC = () => {
   useEffect(() => {
     const getCurrentUser = async () => {
       try {
-        const response = await fetch(buildAuthUrl('me'));
-        
-        // 检查 HTTP 状态码，如果是 401 未授权，直接跳转登录
-        if (response.status === 401 || !response.ok) {
-          window.location.href = buildAppPath('/login');
-          return;
-        }
-        
-        const result = await response.json();
+        const result = await apiService.getMe();
         
         if (result.code === 200 && result.data) {
           setUser({
@@ -104,6 +97,7 @@ const AdminApp: React.FC = () => {
 
   // 处理登出
   const handleLogout = async () => {
+    apiService.clearToken();
     try {
       await fetch(buildAuthUrl('logout'), { method: 'POST' });
     } catch (error) {

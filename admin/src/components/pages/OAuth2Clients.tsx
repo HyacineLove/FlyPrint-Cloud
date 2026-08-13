@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Form, Input, message, Modal, Popconfirm, Space, Table, Tag } from 'antd';
 import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { buildApiUrl, buildAuthUrl } from '../../config';
+import { apiService } from '../../services/api';
 import { mapApiError } from '../../utils/mapApiError';
 
 interface OAuth2Client {
@@ -26,18 +26,14 @@ const OAuth2Clients: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingClient, setEditingClient] = useState<OAuth2Client | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [copyingID, setCopyingID] = useState<string | null>(null);
   const [form] = Form.useForm<ClientForm>();
 
-  const loadClients = async (accessToken: string) => {
+  const loadClients = async () => {
     setLoading(true);
     try {
-      const response = await fetch(buildApiUrl('/admin/oauth2-clients'), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) throw new Error(result.message || '获取客户端列表失败');
+      const result = await apiService.get<{ items?: OAuth2Client[] }>('/admin/oauth2-clients');
+      if (result.code !== 200) throw new Error(result.message || '获取客户端列表失败');
       setClients(result.data?.items || []);
     } catch (error) {
       message.error(mapApiError(error, '获取客户端列表失败'));
@@ -49,12 +45,8 @@ const OAuth2Clients: React.FC = () => {
   useEffect(() => {
     const initialize = async () => {
       try {
-        const response = await fetch(buildAuthUrl('me'));
-        const result = await response.json();
-        const accessToken = result.data?.access_token;
-        if (result.code === 200 && accessToken) {
-          setToken(accessToken);
-          await loadClients(accessToken);
+        if (await apiService.getToken()) {
+          await loadClients();
           return;
         }
       } catch (error) {
@@ -66,11 +58,11 @@ const OAuth2Clients: React.FC = () => {
   }, []);
 
   const submitClient = async (values: ClientForm) => {
-    if (!token) return;
+    if (!(await apiService.getToken())) return;
     const editing = Boolean(editingClient);
     const url = editing
-      ? buildApiUrl(`/admin/oauth2-clients/${editingClient!.id}`)
-      : buildApiUrl('/admin/oauth2-clients');
+      ? `/admin/oauth2-clients/${editingClient!.id}`
+      : '/admin/oauth2-clients';
     const body = editing
       ? { allowed_scopes: values.scopes, description: values.description || '', enabled: editingClient!.enabled }
       : {
@@ -80,36 +72,32 @@ const OAuth2Clients: React.FC = () => {
           description: values.description || '',
         };
     try {
-      const response = await fetch(url, {
+      const result = await apiService.request<any>(url, {
         method: editing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      const result = await response.json();
-      if (!response.ok || (result.code !== 200 && result.code !== 201)) {
+      if (result.code !== 200 && result.code !== 201) {
         throw new Error(result.message || (editing ? '更新失败' : '创建失败'));
       }
       message.success(editing ? '更新成功' : '创建成功，可使用“复制密钥”获取密钥');
       setModalVisible(false);
       setEditingClient(null);
       form.resetFields();
-      await loadClients(token);
+      await loadClients();
     } catch (error) {
       message.error(mapApiError(error, '操作失败'));
     }
   };
 
   const copySecret = async (client: OAuth2Client) => {
-    if (!token || copyingID) return;
+    if (copyingID) return;
     setCopyingID(client.id);
     try {
-      const response = await fetch(buildApiUrl(`/admin/oauth2-clients/${client.id}/secret/copy`), {
+      const result = await apiService.request<any>(`/admin/oauth2-clients/${client.id}/secret/copy`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200 || !result.data?.client_secret) {
+      if (result.code !== 200 || !result.data?.client_secret) {
         throw new Error(result.message || '复制密钥失败');
       }
       await navigator.clipboard.writeText(result.data.client_secret);
@@ -122,14 +110,11 @@ const OAuth2Clients: React.FC = () => {
   };
 
   const resetSecret = async (client: OAuth2Client) => {
-    if (!token) return;
     try {
-      const response = await fetch(buildApiUrl(`/admin/oauth2-clients/${client.id}/secret`), {
+      const result = await apiService.request<any>(`/admin/oauth2-clients/${client.id}/secret`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) throw new Error(result.message || '重置失败');
+      if (result.code !== 200) throw new Error(result.message || '重置失败');
       message.success('密钥已更新，可使用“复制密钥”获取新密钥');
     } catch (error) {
       message.error(mapApiError(error, '重置失败'));
@@ -137,16 +122,13 @@ const OAuth2Clients: React.FC = () => {
   };
 
   const deleteClient = async (client: OAuth2Client) => {
-    if (!token) return;
     try {
-      const response = await fetch(buildApiUrl(`/admin/oauth2-clients/${client.id}`), {
+      const result = await apiService.request<any>(`/admin/oauth2-clients/${client.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
       });
-      const result = await response.json();
-      if (!response.ok || result.code !== 200) throw new Error(result.message || '删除失败');
+      if (result.code !== 200) throw new Error(result.message || '删除失败');
       message.success('删除成功');
-      await loadClients(token);
+      await loadClients();
     } catch (error) {
       message.error(mapApiError(error, '删除失败'));
     }
