@@ -484,16 +484,39 @@ func (r *PrintJobRepository) TrendBuckets(period string, now time.Time) ([]Trend
 	default:
 		return nil, fmt.Errorf("unsupported trend period: %s", period)
 	}
-	query := fmt.Sprintf(`
-		WITH buckets AS (
-			SELECT generate_series($1::timestamp, $2::timestamp - interval '1 %s', interval '1 %s') AS bucket
-		)
-		SELECT b.bucket, to_char(b.bucket + interval '8 hours', $3),
-			COUNT(pj.id) FILTER (WHERE pj.status='completed')::int,
-			COUNT(pj.id) FILTER (WHERE pj.status IN ('failed','cancelled','unconfirmed'))::int
-		FROM buckets b LEFT JOIN print_jobs pj ON pj.created_at >= b.bucket
-			AND pj.created_at < b.bucket + interval '1 %s'
-		GROUP BY b.bucket ORDER BY b.bucket`, step, step, step)
+	var query string
+	if period == "year" {
+		// Do not feed the UTC representation of 1 January directly into a
+		// month-stepped generate_series: in GMT+8 it is December 31 16:00,
+		// and PostgreSQL then clamps 31st/30th to the end of shorter months.
+		// Build every bucket from a first-of-month local anchor instead, then
+		// convert each boundary back to the UTC-valued timestamp used by the
+		// legacy print_jobs.created_at column.
+		query = `
+			WITH buckets AS (
+				SELECT date_trunc('month', ($1::timestamp + interval '8 hours') + (series.n * interval '1 month')) - interval '8 hours' AS bucket,
+					date_trunc('month', ($1::timestamp + interval '8 hours') + ((series.n + 1) * interval '1 month')) - interval '8 hours' AS next_bucket
+				FROM generate_series(0, 11) AS series(n)
+			)
+			SELECT b.bucket, to_char(b.bucket + interval '8 hours', $3),
+				COUNT(pj.id) FILTER (WHERE pj.status='completed')::int,
+				COUNT(pj.id) FILTER (WHERE pj.status IN ('failed','cancelled','unconfirmed'))::int
+			FROM buckets b LEFT JOIN print_jobs pj ON pj.created_at >= b.bucket
+				AND pj.created_at < b.next_bucket
+			WHERE b.bucket < $2::timestamp
+			GROUP BY b.bucket ORDER BY b.bucket`
+	} else {
+		query = fmt.Sprintf(`
+			WITH buckets AS (
+				SELECT generate_series($1::timestamp, $2::timestamp - interval '1 %s', interval '1 %s') AS bucket
+			)
+			SELECT b.bucket, to_char(b.bucket + interval '8 hours', $3),
+				COUNT(pj.id) FILTER (WHERE pj.status='completed')::int,
+				COUNT(pj.id) FILTER (WHERE pj.status IN ('failed','cancelled','unconfirmed'))::int
+			FROM buckets b LEFT JOIN print_jobs pj ON pj.created_at >= b.bucket
+				AND pj.created_at < b.bucket + interval '1 %s'
+			GROUP BY b.bucket ORDER BY b.bucket`, step, step, step)
+	}
 	rows, err := r.db.Query(query, start, end, label)
 	if err != nil {
 		return nil, err

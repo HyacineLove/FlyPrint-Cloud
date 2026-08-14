@@ -26,6 +26,31 @@ func printJobRows() *sqlmock.Rows {
 	)
 }
 
+func TestPrintJobRepositoryTrendBucketsYearUsesCalendarMonthAnchors(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	repo := NewPrintJobRepository(&DB{DB: sqlDB})
+
+	mock.ExpectQuery(`(?s)date_trunc\('month', \(\$1::timestamp \+ interval '8 hours'\) \+ \(series\.n \* interval '1 month'\)\).*next_bucket.*pj\.created_at < b\.next_bucket`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "YYYY-MM").
+		WillReturnRows(sqlmock.NewRows([]string{"bucket", "label", "completed", "failed"}).
+			AddRow(time.Date(2026, 7, 31, 16, 0, 0, 0, time.UTC), "2026-08", 1, 0))
+
+	buckets, err := repo.TrendBuckets("year", time.Date(2026, 8, 14, 12, 0, 0, 0, time.FixedZone("GMT+8", 8*60*60)))
+	if err != nil {
+		t.Fatalf("TrendBuckets() error = %v", err)
+	}
+	if len(buckets) != 1 || buckets[0].Label != "2026-08" || buckets[0].Completed != 1 {
+		t.Fatalf("unexpected trend bucket: %#v", buckets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPrintJobRepositoryListIncludesUserEmailAndFiltersByEmail(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {
