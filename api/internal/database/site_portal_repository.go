@@ -13,13 +13,15 @@ import (
 )
 
 var (
-	ErrSitePortalUnauthorized   = errors.New("site portal unauthorized")
-	ErrSitePortalHasMappings    = errors.New("site portal has identity mappings")
-	ErrSitePortalAssigned       = errors.New("site portal is assigned to an edge node")
-	ErrEdgeNodeNotFound         = errors.New("edge node not found")
-	ErrSitePortalNotFound       = errors.New("site portal not found")
-	ErrSitePortalDisabled       = errors.New("site portal is disabled")
-	ErrDefaultPortalNotAssigned = errors.New("default site portal is not assigned to the edge node")
+	ErrSitePortalUnauthorized     = errors.New("site portal unauthorized")
+	ErrSitePortalHasMappings      = errors.New("site portal has identity mappings")
+	ErrSitePortalAssigned         = errors.New("site portal is assigned to an edge node")
+	ErrEdgeNodeNotFound           = errors.New("edge node not found")
+	ErrSitePortalNotFound         = errors.New("site portal not found")
+	ErrSitePortalDisabled         = errors.New("site portal is disabled")
+	ErrDefaultPortalNotAssigned   = errors.New("default site portal is not assigned to the edge node")
+	ErrSitePortalProviderNotFound = errors.New("site portal provider not found")
+	ErrSitePortalProviderExists   = errors.New("site portal provider already exists")
 )
 
 type SitePortalRepository struct {
@@ -440,4 +442,224 @@ func (r *SitePortalRepository) IsAssignedToNode(nodeID, portalCode string) (bool
 		return false, fmt.Errorf("check Site Portal assignment: %w", err)
 	}
 	return assigned, nil
+}
+
+// ListProviders returns the complete Provider configuration for an admin. The
+// revision is returned separately so an empty list is still distinguishable
+// from a missing Portal.
+func (r *SitePortalRepository) ListProviders(portalCode string) ([]*models.SitePortalProvider, int64, error) {
+	portalCode = strings.TrimSpace(portalCode)
+	var revision int64
+	if err := r.db.QueryRow(`SELECT provider_config_revision FROM site_portals WHERE code=$1`, portalCode).Scan(&revision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, 0, ErrSitePortalNotFound
+		}
+		return nil, 0, fmt.Errorf("get Site Portal Provider revision: %w", err)
+	}
+	rows, err := r.db.Query(`SELECT site_portal_code,provider_id,display_name,enabled,sort_order,file_base_url,sign_secret_ref,
+		portal_api_base_url,upload_enabled,updated_at
+		FROM site_portal_providers WHERE site_portal_code=$1 ORDER BY sort_order,provider_id`, portalCode)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list Site Portal Providers: %w", err)
+	}
+	defer rows.Close()
+	providers, err := scanSitePortalProviders(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return providers, revision, nil
+}
+
+// ListEnabledProviders is the Portal context view. It never returns disabled
+// Provider bindings and never includes a signing key.
+func (r *SitePortalRepository) ListEnabledProviders(portalCode string) ([]*models.SitePortalProvider, int64, error) {
+	portalCode = strings.TrimSpace(portalCode)
+	var revision int64
+	if err := r.db.QueryRow(`SELECT provider_config_revision FROM site_portals WHERE code=$1 AND enabled=true`, portalCode).Scan(&revision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, 0, ErrSitePortalNotFound
+		}
+		return nil, 0, fmt.Errorf("get enabled Site Portal Provider revision: %w", err)
+	}
+	rows, err := r.db.Query(`SELECT site_portal_code,provider_id,display_name,enabled,sort_order,file_base_url,sign_secret_ref,
+		portal_api_base_url,upload_enabled,updated_at
+		FROM site_portal_providers WHERE site_portal_code=$1 AND enabled=true ORDER BY sort_order,provider_id`, portalCode)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list enabled Site Portal Providers: %w", err)
+	}
+	defer rows.Close()
+	providers, err := scanSitePortalProviders(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return providers, revision, nil
+}
+
+func scanSitePortalProviders(rows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}) ([]*models.SitePortalProvider, error) {
+	var providers []*models.SitePortalProvider
+	for rows.Next() {
+		provider := &models.SitePortalProvider{}
+		var portalAPIBaseURL sql.NullString
+		if err := rows.Scan(&provider.SitePortalCode, &provider.ProviderID, &provider.DisplayName,
+			&provider.Enabled, &provider.SortOrder, &provider.FileBaseURL, &provider.SignSecretRef,
+			&portalAPIBaseURL, &provider.UploadEnabled, &provider.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan Site Portal Provider: %w", err)
+		}
+		provider.PortalAPIBaseURL = portalAPIBaseURL.String
+		providers = append(providers, provider)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list Site Portal Provider rows: %w", err)
+	}
+	return providers, nil
+}
+
+func lockSitePortal(tx *Tx, portalCode string) error {
+	var code string
+	if err := tx.QueryRow(`SELECT code FROM site_portals WHERE code=$1 FOR UPDATE`, portalCode).Scan(&code); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrSitePortalNotFound
+		}
+		return fmt.Errorf("lock Site Portal: %w", err)
+	}
+	return nil
+}
+
+func bumpSitePortalProviderRevision(tx *Tx, portalCode string) error {
+	if _, err := tx.Exec(`UPDATE site_portals SET provider_config_revision=provider_config_revision+1,updated_at=CURRENT_TIMESTAMP WHERE code=$1`, portalCode); err != nil {
+		return fmt.Errorf("bump Site Portal Provider revision: %w", err)
+	}
+	return nil
+}
+
+func (r *SitePortalRepository) CreateProvider(provider *models.SitePortalProvider) error {
+	if provider == nil {
+		return fmt.Errorf("Site Portal Provider is required")
+	}
+	provider.SitePortalCode = strings.TrimSpace(provider.SitePortalCode)
+	tx, err := r.db.BeginTx()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := lockSitePortal(tx, provider.SitePortalCode); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO site_portal_providers(site_portal_code,provider_id,display_name,enabled,sort_order,file_base_url,sign_secret_ref,portal_api_base_url,upload_enabled)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, provider.SitePortalCode, provider.ProviderID, provider.DisplayName,
+		provider.Enabled, provider.SortOrder, provider.FileBaseURL, provider.SignSecretRef, provider.PortalAPIBaseURL, provider.UploadEnabled)
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrSitePortalProviderExists
+		}
+		return fmt.Errorf("create Site Portal Provider: %w", err)
+	}
+	if err := bumpSitePortalProviderRevision(tx, provider.SitePortalCode); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (r *SitePortalRepository) UpdateProvider(provider *models.SitePortalProvider) error {
+	if provider == nil {
+		return fmt.Errorf("Site Portal Provider is required")
+	}
+	provider.SitePortalCode = strings.TrimSpace(provider.SitePortalCode)
+	tx, err := r.db.BeginTx()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := lockSitePortal(tx, provider.SitePortalCode); err != nil {
+		return err
+	}
+	result, err := tx.Exec(`UPDATE site_portal_providers SET display_name=$3,enabled=$4,sort_order=$5,file_base_url=$6,sign_secret_ref=$7,portal_api_base_url=$8,upload_enabled=$9,updated_at=CURRENT_TIMESTAMP
+		WHERE site_portal_code=$1 AND provider_id=$2`, provider.SitePortalCode, provider.ProviderID, provider.DisplayName,
+		provider.Enabled, provider.SortOrder, provider.FileBaseURL, provider.SignSecretRef, provider.PortalAPIBaseURL, provider.UploadEnabled)
+	if err != nil {
+		return fmt.Errorf("update Site Portal Provider: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrSitePortalProviderNotFound
+	}
+	if err := bumpSitePortalProviderRevision(tx, provider.SitePortalCode); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (r *SitePortalRepository) SetProviderEnabled(portalCode, providerID string, enabled bool) error {
+	return r.mutateProvider(portalCode, providerID, func(tx *Tx) error {
+		result, err := tx.Exec(`UPDATE site_portal_providers SET enabled=$3,updated_at=CURRENT_TIMESTAMP WHERE site_portal_code=$1 AND provider_id=$2`, portalCode, providerID, enabled)
+		if err != nil {
+			return fmt.Errorf("update Site Portal Provider state: %w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return ErrSitePortalProviderNotFound
+		}
+		return nil
+	})
+}
+
+func (r *SitePortalRepository) DeleteProvider(portalCode, providerID string) error {
+	return r.mutateProvider(portalCode, providerID, func(tx *Tx) error {
+		result, err := tx.Exec(`DELETE FROM site_portal_providers WHERE site_portal_code=$1 AND provider_id=$2`, portalCode, providerID)
+		if err != nil {
+			return fmt.Errorf("delete Site Portal Provider: %w", err)
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return ErrSitePortalProviderNotFound
+		}
+		return nil
+	})
+}
+
+func (r *SitePortalRepository) mutateProvider(portalCode, providerID string, mutate func(*Tx) error) error {
+	portalCode, providerID = strings.TrimSpace(portalCode), strings.TrimSpace(providerID)
+	tx, err := r.db.BeginTx()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := lockSitePortal(tx, portalCode); err != nil {
+		return err
+	}
+	if err := mutate(tx); err != nil {
+		return err
+	}
+	if err := bumpSitePortalProviderRevision(tx, portalCode); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

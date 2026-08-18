@@ -37,6 +37,20 @@ type edgeSitePortalConfigRequest struct {
 	DefaultPortalCode string   `json:"default_code"`
 }
 
+var sitePortalProviderIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
+var sitePortalProviderSecretRefPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}$`)
+
+type sitePortalProviderRequest struct {
+	ProviderID       string `json:"provider_id"`
+	DisplayName      string `json:"display_name"`
+	Enabled          *bool  `json:"enabled"`
+	SortOrder        int    `json:"sort_order"`
+	FileBaseURL      string `json:"file_base_url"`
+	SignSecretRef    string `json:"sign_secret_ref"`
+	PortalAPIBaseURL string `json:"portal_api_base_url"`
+	UploadEnabled    bool   `json:"upload_enabled"`
+}
+
 func validateSitePortalAdminRequest(req sitePortalAdminRequest) error {
 	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9_-]{1,63}$`, strings.TrimSpace(req.Code)); !matched {
 		return fmt.Errorf("invalid Site Portal code")
@@ -45,6 +59,34 @@ func validateSitePortalAdminRequest(req sitePortalAdminRequest) error {
 		parsed, err := url.Parse(strings.TrimSpace(raw))
 		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 			return fmt.Errorf("%s must be an absolute HTTP(S) URL", name)
+		}
+	}
+	return nil
+}
+
+func validateSitePortalProviderRequest(req sitePortalProviderRequest) error {
+	if !sitePortalProviderIDPattern.MatchString(strings.TrimSpace(req.ProviderID)) {
+		return fmt.Errorf("invalid Provider ID")
+	}
+	if value := strings.TrimSpace(req.DisplayName); value == "" || len([]rune(value)) > 120 {
+		return fmt.Errorf("display_name is required and must be at most 120 characters")
+	}
+	if req.SortOrder < 0 {
+		return fmt.Errorf("sort_order must be non-negative")
+	}
+	if !sitePortalProviderSecretRefPattern.MatchString(strings.TrimSpace(req.SignSecretRef)) {
+		return fmt.Errorf("sign_secret_ref must match [A-Z][A-Z0-9_]{0,31}")
+	}
+	for name, raw := range map[string]string{"file_base_url": req.FileBaseURL} {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%s must be an absolute HTTP(S) URL without credentials or query", name)
+		}
+	}
+	if req.UploadEnabled {
+		parsed, err := url.Parse(strings.TrimSpace(req.PortalAPIBaseURL))
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("portal_api_base_url must be an absolute HTTP(S) URL when upload_enabled")
 		}
 	}
 	return nil
@@ -199,6 +241,114 @@ func (h *SitePortalAdminHandler) RotateSecret(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	SuccessResponse(c, gin.H{"client_id": client.ClientID, "client_secret": rawSecret})
+}
+
+func (h *SitePortalAdminHandler) ListProviders(c *gin.Context) {
+	portalCode := strings.TrimSpace(c.Param("code"))
+	providers, revision, err := h.portals.ListProviders(portalCode)
+	if err != nil {
+		if errors.Is(err, database.ErrSitePortalNotFound) {
+			NotFoundResponse(c, "Site Portal not found")
+			return
+		}
+		InternalErrorResponse(c, "failed to list Site Portal Providers")
+		return
+	}
+	SuccessResponse(c, gin.H{"provider_config_revision": revision, "providers": providers})
+}
+
+func (h *SitePortalAdminHandler) CreateProvider(c *gin.Context) {
+	portalCode := strings.TrimSpace(c.Param("code"))
+	var req sitePortalProviderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ValidationErrorResponse(c, err)
+		return
+	}
+	if req.Enabled == nil {
+		enabled := true
+		req.Enabled = &enabled
+	}
+	req.ProviderID, req.DisplayName, req.FileBaseURL, req.SignSecretRef, req.PortalAPIBaseURL = strings.TrimSpace(req.ProviderID), strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.FileBaseURL), strings.TrimSpace(req.SignSecretRef), strings.TrimSpace(req.PortalAPIBaseURL)
+	if err := validateSitePortalProviderRequest(req); err != nil {
+		BadRequestResponse(c, err.Error())
+		return
+	}
+	provider := &models.SitePortalProvider{SitePortalCode: portalCode, ProviderID: req.ProviderID, DisplayName: req.DisplayName, Enabled: *req.Enabled, SortOrder: req.SortOrder, FileBaseURL: req.FileBaseURL, SignSecretRef: req.SignSecretRef, PortalAPIBaseURL: req.PortalAPIBaseURL, UploadEnabled: req.UploadEnabled}
+	if err := h.portals.CreateProvider(provider); err != nil {
+		switch {
+		case errors.Is(err, database.ErrSitePortalNotFound):
+			NotFoundResponse(c, "Site Portal not found")
+		case errors.Is(err, database.ErrSitePortalProviderExists):
+			BadRequestResponse(c, "Provider ID already exists in this Site Portal")
+		default:
+			InternalErrorResponse(c, "failed to create Site Portal Provider")
+		}
+		return
+	}
+	SuccessResponse(c, provider)
+}
+
+func (h *SitePortalAdminHandler) UpdateProvider(c *gin.Context) {
+	portalCode, providerID := strings.TrimSpace(c.Param("code")), strings.TrimSpace(c.Param("provider_id"))
+	var req sitePortalProviderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ValidationErrorResponse(c, err)
+		return
+	}
+	if req.Enabled == nil {
+		BadRequestResponse(c, "enabled is required for Provider replacement")
+		return
+	}
+	req.ProviderID, req.DisplayName, req.FileBaseURL, req.SignSecretRef, req.PortalAPIBaseURL = providerID, strings.TrimSpace(req.DisplayName), strings.TrimSpace(req.FileBaseURL), strings.TrimSpace(req.SignSecretRef), strings.TrimSpace(req.PortalAPIBaseURL)
+	if err := validateSitePortalProviderRequest(req); err != nil {
+		BadRequestResponse(c, err.Error())
+		return
+	}
+	enabled := *req.Enabled
+	provider := &models.SitePortalProvider{SitePortalCode: portalCode, ProviderID: providerID, DisplayName: req.DisplayName, Enabled: enabled, SortOrder: req.SortOrder, FileBaseURL: req.FileBaseURL, SignSecretRef: req.SignSecretRef, PortalAPIBaseURL: req.PortalAPIBaseURL, UploadEnabled: req.UploadEnabled}
+	if err := h.portals.UpdateProvider(provider); err != nil {
+		switch {
+		case errors.Is(err, database.ErrSitePortalNotFound), errors.Is(err, database.ErrSitePortalProviderNotFound):
+			NotFoundResponse(c, "Site Portal Provider not found")
+		default:
+			InternalErrorResponse(c, "failed to update Site Portal Provider")
+		}
+		return
+	}
+	SuccessResponse(c, provider)
+}
+
+func (h *SitePortalAdminHandler) SetProviderEnabled(c *gin.Context) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ValidationErrorResponse(c, err)
+		return
+	}
+	portalCode, providerID := strings.TrimSpace(c.Param("code")), strings.TrimSpace(c.Param("provider_id"))
+	if err := h.portals.SetProviderEnabled(portalCode, providerID, req.Enabled); err != nil {
+		if errors.Is(err, database.ErrSitePortalNotFound) || errors.Is(err, database.ErrSitePortalProviderNotFound) {
+			NotFoundResponse(c, "Site Portal Provider not found")
+			return
+		}
+		InternalErrorResponse(c, "failed to update Site Portal Provider state")
+		return
+	}
+	SuccessResponse(c, gin.H{"provider_id": providerID, "enabled": req.Enabled})
+}
+
+func (h *SitePortalAdminHandler) DeleteProvider(c *gin.Context) {
+	portalCode, providerID := strings.TrimSpace(c.Param("code")), strings.TrimSpace(c.Param("provider_id"))
+	if err := h.portals.DeleteProvider(portalCode, providerID); err != nil {
+		if errors.Is(err, database.ErrSitePortalNotFound) || errors.Is(err, database.ErrSitePortalProviderNotFound) {
+			NotFoundResponse(c, "Site Portal Provider not found")
+			return
+		}
+		InternalErrorResponse(c, "failed to delete Site Portal Provider")
+		return
+	}
+	SuccessResponse(c, gin.H{"deleted": true, "provider_id": providerID})
 }
 
 func validateEdgeSitePortalConfig(req edgeSitePortalConfigRequest) error {

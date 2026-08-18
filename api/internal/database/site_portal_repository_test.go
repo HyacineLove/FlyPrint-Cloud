@@ -148,3 +148,44 @@ func TestDeleteSitePortalRejectsIdentityMappings(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestListEnabledSitePortalProvidersReturnsRevisionAndStableOrder(t *testing.T) {
+	db, mock, closeDB := newUserRepositoryTestDB(t)
+	defer closeDB()
+	repo := NewSitePortalRepository(db)
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT provider_config_revision FROM site_portals WHERE code=$1 AND enabled=true`)).
+		WithArgs("official").WillReturnRows(sqlmock.NewRows([]string{"provider_config_revision"}).AddRow(4))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT site_portal_code,provider_id,display_name,enabled,sort_order,file_base_url,sign_secret_ref,
+		portal_api_base_url,upload_enabled,updated_at
+		FROM site_portal_providers WHERE site_portal_code=$1 AND enabled=true ORDER BY sort_order,provider_id`)).
+		WithArgs("official").WillReturnRows(sqlmock.NewRows([]string{"site_portal_code", "provider_id", "display_name", "enabled", "sort_order", "file_base_url", "sign_secret_ref", "portal_api_base_url", "upload_enabled", "updated_at"}).
+		AddRow("official", "invoice", "发票", true, 1, "https://files.example.test", "INVOICE", nil, false, now))
+	providers, revision, err := repo.ListEnabledProviders("official")
+	if err != nil || revision != 4 || len(providers) != 1 || providers[0].ProviderID != "invoice" {
+		t.Fatalf("providers=%#v revision=%d err=%v", providers, revision, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetSitePortalProviderEnabledBumpsPortalRevisionAtomically(t *testing.T) {
+	db, mock, closeDB := newUserRepositoryTestDB(t)
+	defer closeDB()
+	repo := NewSitePortalRepository(db)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT code FROM site_portals WHERE code=$1 FOR UPDATE`)).
+		WithArgs("official").WillReturnRows(sqlmock.NewRows([]string{"code"}).AddRow("official"))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE site_portal_providers SET enabled=$3,updated_at=CURRENT_TIMESTAMP WHERE site_portal_code=$1 AND provider_id=$2`)).
+		WithArgs("official", "invoice", false).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE site_portals SET provider_config_revision=provider_config_revision+1,updated_at=CURRENT_TIMESTAMP WHERE code=$1`)).
+		WithArgs("official").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := repo.SetProviderEnabled("official", "invoice", false); err != nil {
+		t.Fatalf("SetProviderEnabled() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

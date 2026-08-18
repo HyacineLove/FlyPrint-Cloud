@@ -16,6 +16,22 @@ type SitePortal struct {
 	EdgeNodeCount      int       `json:"edge_node_count"`
 }
 
+// SitePortalProvider is a Cloud-owned Provider binding for one Site Portal.
+// It intentionally contains only a secret reference; the signing key itself
+// remains local to the Site Portal deployment.
+type SitePortalProvider struct {
+	SitePortalCode   string    `json:"site_portal_code,omitempty"`
+	ProviderID       string    `json:"provider_id"`
+	DisplayName      string    `json:"display_name"`
+	Enabled          bool      `json:"enabled"`
+	SortOrder        int       `json:"sort_order"`
+	FileBaseURL      string    `json:"file_base_url"`
+	SignSecretRef    string    `json:"sign_secret_ref"`
+	PortalAPIBaseURL string    `json:"portal_api_base_url,omitempty"`
+	UploadEnabled    bool      `json:"upload_enabled,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 // EdgeSitePortalConfig is the Cloud-owned entry configuration for one Edge
 // node. The default portal must always be one of Portals.
 type EdgeSitePortalConfig struct {

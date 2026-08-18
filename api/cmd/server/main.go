@@ -371,7 +371,7 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 		}
 
 		apiV1Group.POST("/public/terminal-entry/acquire", terminalTicketHandler.Acquire)
-		apiV1Group.GET("/public/terminal-entry/status", terminalTicketHandler.EntryStatus)
+		apiV1Group.POST("/public/terminal-entry/status", terminalTicketHandler.EntryStatus)
 		apiV1Group.POST("/public/terminal-entry/select", terminalTicketHandler.SelectEntry)
 		// Admin Console API - 需要 admin:* scope
 		adminGroup := apiV1Group.Group("/admin")
@@ -414,6 +414,11 @@ func setupRoutes(r *gin.Engine, userHandler *handlers.UserHandler, edgeNodeHandl
 				sitePortalGroup.PATCH("/:code/enabled", sitePortalAdminHandler.SetEnabled)
 				sitePortalGroup.DELETE("/:code", sitePortalAdminHandler.Delete)
 				sitePortalGroup.POST("/:code/rotate-secret", sitePortalAdminHandler.RotateSecret)
+				sitePortalGroup.GET("/:code/providers", sitePortalAdminHandler.ListProviders)
+				sitePortalGroup.POST("/:code/providers", sitePortalAdminHandler.CreateProvider)
+				sitePortalGroup.PUT("/:code/providers/:provider_id", sitePortalAdminHandler.UpdateProvider)
+				sitePortalGroup.PATCH("/:code/providers/:provider_id/enabled", sitePortalAdminHandler.SetProviderEnabled)
+				sitePortalGroup.DELETE("/:code/providers/:provider_id", sitePortalAdminHandler.DeleteProvider)
 			}
 
 			opsContactGroup := adminGroup.Group("/ops-contacts", middleware.OAuth2ResourceServerAny("fly-print-admin", "fly-print-operator"))
