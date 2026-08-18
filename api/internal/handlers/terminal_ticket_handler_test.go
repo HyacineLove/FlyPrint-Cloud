@@ -24,9 +24,31 @@ func TestEntryPageReadsT1FromFragmentOnly(t *testing.T) {
 		t.Fatal("entry page must not accept terminal_ticket query")
 	}
 }
+
+func TestEntryBootstrapBindsPollingToAcquiredEntry(t *testing.T) {
+	if !strings.Contains(entryBootstrapPage, "entry_session_id") {
+		t.Fatal("entry bootstrap must bind status polling to the entry session returned by acquire")
+	}
+	if !strings.Contains(entryBootstrapPage, "JSON.stringify({entry_session_id") {
+		t.Fatal("entry status polling must send its entry session binding")
+	}
+	if !strings.Contains(entryBootstrapPage, "/entry/options?entry_session_id=") {
+		t.Fatal("entry options navigation must retain the acquired entry session binding")
+	}
+}
+
+func TestSelectionPageBindsSelectionToEntry(t *testing.T) {
+	w := httptest.NewRecorder()
+	renderSitePortalSelectionPage(w, "entry-1", []*models.SitePortal{{Code: "official", DisplayName: "官方入口", Enabled: true}}, "official", time.Now().Add(time.Minute))
+	page := w.Body.String()
+	if !strings.Contains(page, "entry_session_id") {
+		t.Fatal("entry selection must retain the entry session binding")
+	}
+}
+
 func TestSelectionPageDoesNotEmbedCredential(t *testing.T) {
 	w := httptest.NewRecorder()
-	renderSitePortalSelectionPage(w, []*models.SitePortal{{Code: "internal-campus", DisplayName: "校园打印", Enabled: true}}, "internal-campus", time.Now().Add(time.Minute))
+	renderSitePortalSelectionPage(w, "entry-1", []*models.SitePortal{{Code: "internal-campus", DisplayName: "校园打印", Enabled: true}}, "internal-campus", time.Now().Add(time.Minute))
 	page := w.Body.String()
 	if !strings.Contains(page, "/api/v1/public/terminal-entry/select") {
 		t.Fatal("missing select endpoint")
@@ -48,9 +70,42 @@ func TestSelectionPageDoesNotEmbedCredential(t *testing.T) {
 	}
 }
 
+func TestSelectionPageAutoSubmitsWhenOnlyOnePortal(t *testing.T) {
+	w := httptest.NewRecorder()
+	renderSitePortalSelectionPage(w, "entry-1", []*models.SitePortal{{Code: "liwa", DisplayName: "丽娃云聘", Enabled: true}}, "liwa", time.Now().Add(time.Minute))
+	page := w.Body.String()
+	if !strings.Contains(page, "buttons.length===1") || !strings.Contains(page, "submit(buttons[0])") {
+		t.Fatal("single portal must auto-submit without waiting for a click")
+	}
+	if !strings.Contains(page, "正在进入打印入口") {
+		t.Fatal("single portal page must look like a direct handoff")
+	}
+}
+
+func TestSelectionPageWaitsForClickWhenMultiplePortals(t *testing.T) {
+	w := httptest.NewRecorder()
+	renderSitePortalSelectionPage(w, "entry-1", []*models.SitePortal{
+		{Code: "liwa", DisplayName: "丽娃云聘", Enabled: true},
+		{Code: "campus", DisplayName: "校园打印", Enabled: true},
+	}, "liwa", time.Now().Add(time.Minute))
+	page := w.Body.String()
+	if !strings.Contains(page, `data-entry="liwa"`) || !strings.Contains(page, `data-entry="campus"`) {
+		t.Fatal("multiple portals must remain selectable")
+	}
+	if !strings.Contains(page, "if(buttons.length===1)") {
+		t.Fatal("multiple portals must keep the single-entry auto-submit guard")
+	}
+	if strings.Contains(page, "正在进入打印入口") {
+		t.Fatal("multiple portals must not auto-handoff copy")
+	}
+	if !strings.Contains(page, "选择打印入口") {
+		t.Fatal("multiple portals must keep the selection copy")
+	}
+}
+
 func TestSelectionPageEscapesPortalDisplayName(t *testing.T) {
 	w := httptest.NewRecorder()
-	renderSitePortalSelectionPage(w, []*models.SitePortal{{Code: "safe-code", DisplayName: `<img src=x onerror=alert(1)>`, Enabled: true}}, "", time.Now().Add(time.Minute))
+	renderSitePortalSelectionPage(w, "entry-1", []*models.SitePortal{{Code: "safe-code", DisplayName: `<img src=x onerror=alert(1)>`, Enabled: true}}, "", time.Now().Add(time.Minute))
 	page := w.Body.String()
 	if strings.Contains(page, `<img src=x onerror=alert(1)>`) {
 		t.Fatal("selection page must escape portal display names")

@@ -25,6 +25,17 @@ func (f *fakeSitePortalAuthenticator) GetByCode(code string) (*models.SitePortal
 	return f.portal, nil
 }
 
+type fakeSitePortalProviderAuthenticator struct {
+	*fakeSitePortalAuthenticator
+	providers []*models.SitePortalProvider
+	revision  int64
+	err       error
+}
+
+func (f *fakeSitePortalProviderAuthenticator) ListEnabledProviders(string) ([]*models.SitePortalProvider, int64, error) {
+	return f.providers, f.revision, f.err
+}
+
 type fakePortalEntries struct {
 	attempt      *models.EntryPortalAttempt
 	entry        *models.EntrySession
@@ -82,6 +93,37 @@ func TestSitePortalContextConsumesOnlyHandoff(t *testing.T) {
 	}
 	if bytes.Contains(w.Body.Bytes(), []byte("t3-secret")) {
 		t.Fatal("handoff leaked in context response")
+	}
+}
+
+func TestSitePortalContextReturnsEnabledProviderSnapshotOnly(t *testing.T) {
+	entries := &fakePortalEntries{attempt: &models.EntryPortalAttempt{ID: "attempt-1"}, entry: &models.EntrySession{
+		NodeID: "node-1", PrinterID: "printer-1", TerminalSessionID: "session-1", QRGeneration: 7, ExpiresAt: time.Now().Add(time.Minute),
+	}}
+	authenticator := &fakeSitePortalProviderAuthenticator{
+		fakeSitePortalAuthenticator: &fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official", Enabled: true}},
+		providers:                   []*models.SitePortalProvider{{ProviderID: "invoice", DisplayName: "发票", Enabled: true, SortOrder: 1, FileBaseURL: "https://files.example.test", SignSecretRef: "INVOICE"}},
+		revision:                    12,
+	}
+	h := NewSitePortalHandler(authenticator, entries, &fakePortalLoginCompleter{}, &fakePortalDispatcher{})
+	w := httptest.NewRecorder()
+	newSitePortalTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/context", bytes.NewBufferString(`{"handoff":"t3-secret"}`)))
+	if w.Code != http.StatusOK || !bytes.Contains(w.Body.Bytes(), []byte(`"provider_config_revision":12`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"sign_secret_ref":"INVOICE"`)) || bytes.Contains(w.Body.Bytes(), []byte("raw-secret")) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestSitePortalContextRejectsEmptyEnabledProviderConfiguration(t *testing.T) {
+	entries := &fakePortalEntries{attempt: &models.EntryPortalAttempt{ID: "attempt-1"}, entry: &models.EntrySession{NodeID: "node-1", PrinterID: "printer-1", TerminalSessionID: "session-1", QRGeneration: 7, ExpiresAt: time.Now().Add(time.Minute)}}
+	authenticator := &fakeSitePortalProviderAuthenticator{
+		fakeSitePortalAuthenticator: &fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official", Enabled: true}},
+		revision:                    12,
+	}
+	h := NewSitePortalHandler(authenticator, entries, &fakePortalLoginCompleter{}, &fakePortalDispatcher{})
+	w := httptest.NewRecorder()
+	newSitePortalTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/context", bytes.NewBufferString(`{"handoff":"t3-secret"}`)))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

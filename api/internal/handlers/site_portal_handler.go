@@ -18,6 +18,9 @@ const maxPortalClaimTTL = 5 * time.Minute
 type sitePortalAuthenticator interface {
 	GetByCode(code string) (*models.SitePortal, error)
 }
+type sitePortalProviderLister interface {
+	ListEnabledProviders(portalCode string) ([]*models.SitePortalProvider, int64, error)
+}
 type portalLoginCompleter interface {
 	CompleteLogin(input database.CompletePortalLoginInput) (*models.PortalLoginCompletion, error)
 }
@@ -64,6 +67,17 @@ type validateClaimRequest struct {
 	QRGeneration      int64  `json:"qr_generation" binding:"required"`
 }
 
+type portalContextProvider struct {
+	ProviderID       string    `json:"provider_id"`
+	DisplayName      string    `json:"display_name"`
+	SortOrder        int       `json:"sort_order"`
+	FileBaseURL      string    `json:"file_base_url"`
+	SignSecretRef    string    `json:"sign_secret_ref"`
+	PortalAPIBaseURL string    `json:"portal_api_base_url,omitempty"`
+	UploadEnabled    bool      `json:"upload_enabled,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 func (h *SitePortalHandler) authenticate(c *gin.Context) (*models.SitePortal, bool) {
 	clientType, _ := c.Get("client_type")
 	claimed, _ := c.Get("site_portal_code")
@@ -93,12 +107,38 @@ func (h *SitePortalHandler) Context(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_terminal_context"})
 		return
 	}
+	var providers []*models.SitePortalProvider
+	var providerRevision int64
+	if lister, ok := h.portals.(sitePortalProviderLister); ok {
+		var err error
+		providers, providerRevision, err = lister.ListEnabledProviders(p.Code)
+		if err != nil {
+			if errors.Is(err, database.ErrSitePortalNotFound) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "site_portal_unauthorized"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "site_portal_provider_config_unavailable"})
+			return
+		}
+		if len(providers) == 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "site_portal_provider_config_unavailable"})
+			return
+		}
+	}
 	attempt, entry, err := h.entries.ConsumeT3(ticketHash(strings.TrimSpace(in.Handoff)), p.Code, h.now())
 	if err != nil {
 		c.JSON(http.StatusGone, gin.H{"error": "entry_handoff_invalid"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"portal_attempt_id": attempt.ID, "site_portal_code": p.Code, "node_id": entry.NodeID, "printer_id": entry.PrinterID, "terminal_session_id": entry.TerminalSessionID, "qr_generation": entry.QRGeneration, "expires_at": entry.ExpiresAt})
+	contextProviders := make([]portalContextProvider, 0, len(providers))
+	for _, provider := range providers {
+		contextProviders = append(contextProviders, portalContextProvider{
+			ProviderID: provider.ProviderID, DisplayName: provider.DisplayName, SortOrder: provider.SortOrder,
+			FileBaseURL: provider.FileBaseURL, SignSecretRef: provider.SignSecretRef,
+			PortalAPIBaseURL: provider.PortalAPIBaseURL, UploadEnabled: provider.UploadEnabled, UpdatedAt: provider.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"portal_attempt_id": attempt.ID, "site_portal_code": p.Code, "node_id": entry.NodeID, "printer_id": entry.PrinterID, "terminal_session_id": entry.TerminalSessionID, "qr_generation": entry.QRGeneration, "expires_at": entry.ExpiresAt, "provider_config_revision": providerRevision, "providers": contextProviders})
 }
 
 func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {

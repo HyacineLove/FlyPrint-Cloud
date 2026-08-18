@@ -92,11 +92,11 @@ func (r *EntrySessionRepository) MarkMasked(nodeID, commandID string, now time.T
 // Activate converts the temporary acquire lease to T2 only after Edge has
 // confirmed the screen is masked.  The caller owns the raw T2 solely to place
 // it in an HttpOnly cookie.
-func (r *EntrySessionRepository) Activate(acquireHash, t2Hash string, now time.Time) (*models.EntrySession, error) {
+func (r *EntrySessionRepository) Activate(acquireHash, entryID, t2Hash string, now time.Time) (*models.EntrySession, error) {
 	row := r.db.QueryRow(`UPDATE entry_sessions SET status='entry_active',t2_hash=$2
-		WHERE acquire_hash=$1 AND status='mask_pending' AND mask_confirmed_at IS NOT NULL AND expires_at>$3
+		WHERE acquire_hash=$1 AND id=$3::uuid AND status='mask_pending' AND mask_confirmed_at IS NOT NULL AND expires_at>$4
 		RETURNING id,t1_hash,COALESCE(acquire_hash,''),COALESCE(t2_hash,''),node_id,printer_id::text,terminal_session_id,qr_generation,status,
-		COALESCE(mask_command_id::text,''),mask_confirmed_at,portal_attempt_version,issued_at,expires_at`, acquireHash, t2Hash, now)
+		COALESCE(mask_command_id::text,''),mask_confirmed_at,portal_attempt_version,issued_at,expires_at`, acquireHash, t2Hash, entryID, now)
 	entry, err := scanEntrySession(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrEntrySessionInvalid
@@ -104,10 +104,10 @@ func (r *EntrySessionRepository) Activate(acquireHash, t2Hash string, now time.T
 	return entry, err
 }
 
-func (r *EntrySessionRepository) GetByAcquire(acquireHash string, now time.Time) (*models.EntrySession, error) {
+func (r *EntrySessionRepository) GetByAcquire(acquireHash, entryID string, now time.Time) (*models.EntrySession, error) {
 	row := r.db.QueryRow(`SELECT id,t1_hash,COALESCE(acquire_hash,''),COALESCE(t2_hash,''),node_id,printer_id::text,terminal_session_id,qr_generation,status,
 		COALESCE(mask_command_id::text,''),mask_confirmed_at,portal_attempt_version,issued_at,expires_at
-		FROM entry_sessions WHERE acquire_hash=$1 AND status='mask_pending' AND expires_at>$2`, acquireHash, now)
+		FROM entry_sessions WHERE acquire_hash=$1 AND id=$2::uuid AND status='mask_pending' AND expires_at>$3`, acquireHash, entryID, now)
 	entry, err := scanEntrySession(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrEntrySessionInvalid
@@ -115,10 +115,10 @@ func (r *EntrySessionRepository) GetByAcquire(acquireHash string, now time.Time)
 	return entry, err
 }
 
-func (r *EntrySessionRepository) GetActiveByT2(t2Hash string, now time.Time) (*models.EntrySession, error) {
+func (r *EntrySessionRepository) GetActiveByT2(t2Hash, entryID string, now time.Time) (*models.EntrySession, error) {
 	row := r.db.QueryRow(`SELECT id,t1_hash,COALESCE(acquire_hash,''),COALESCE(t2_hash,''),node_id,printer_id::text,terminal_session_id,qr_generation,status,
 		COALESCE(mask_command_id::text,''),mask_confirmed_at,portal_attempt_version,issued_at,expires_at
-		FROM entry_sessions WHERE t2_hash=$1 AND status='entry_active' AND expires_at>$2`, t2Hash, now)
+		FROM entry_sessions WHERE t2_hash=$1 AND id=$2::uuid AND status='entry_active' AND expires_at>$3`, t2Hash, entryID, now)
 	entry, err := scanEntrySession(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrEntrySessionInvalid

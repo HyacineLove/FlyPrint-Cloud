@@ -8,6 +8,7 @@ import (
 	"html"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,10 @@ type acquireEntryRequest struct {
 	Ticket string `json:"ticket" binding:"required"`
 }
 
+type entryStatusRequest struct {
+	EntrySessionID string `json:"entry_session_id" binding:"required"`
+}
+
 func (h *TerminalTicketHandler) Acquire(c *gin.Context) {
 	var request acquireEntryRequest
 	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.Ticket) == "" {
@@ -77,17 +82,22 @@ func (h *TerminalTicketHandler) Acquire(c *gin.Context) {
 		return
 	}
 	h.setCookie(c, entryAcquireCookie, acquireRaw, entry.ExpiresAt)
-	c.JSON(http.StatusAccepted, gin.H{"status": "mask_pending"})
+	c.JSON(http.StatusAccepted, gin.H{"status": "mask_pending", "entry_session_id": entry.ID})
 }
 
 func (h *TerminalTicketHandler) EntryStatus(c *gin.Context) {
+	var request entryStatusRequest
+	if err := c.ShouldBindJSON(&request); err != nil || strings.TrimSpace(request.EntrySessionID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "entry_invalid"})
+		return
+	}
 	lease, err := c.Cookie(entryAcquireCookie)
 	if err != nil || lease == "" {
 		c.JSON(http.StatusGone, gin.H{"error": "entry_invalid"})
 		return
 	}
 	leaseHash := ticketHash(lease)
-	entry, err := h.entries.GetByAcquire(leaseHash, time.Now())
+	entry, err := h.entries.GetByAcquire(leaseHash, strings.TrimSpace(request.EntrySessionID), time.Now())
 	if err != nil {
 		c.JSON(http.StatusGone, gin.H{"error": "entry_invalid"})
 		return
@@ -101,27 +111,28 @@ func (h *TerminalTicketHandler) EntryStatus(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "entry_unavailable"})
 		return
 	}
-	entry, err = h.entries.Activate(leaseHash, t2Hash, time.Now())
+	entry, err = h.entries.Activate(leaseHash, entry.ID, t2Hash, time.Now())
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "entry_invalid"})
 		return
 	}
 	h.clearCookie(c, entryAcquireCookie)
 	h.setCookie(c, entryCookie, t2Raw, entry.ExpiresAt)
-	c.JSON(http.StatusOK, gin.H{"status": "entry_active"})
+	c.JSON(http.StatusOK, gin.H{"status": "entry_active", "entry_session_id": entry.ID})
 }
 
 func (h *TerminalTicketHandler) SelectPage(c *gin.Context) {
-	entry, portals, err := h.loadActiveEntry(c)
+	entry, portals, err := h.loadActiveEntry(c, strings.TrimSpace(c.Query("entry_session_id")))
 	if err != nil {
 		renderEntryError(c, http.StatusGone, "二维码已失效", "请返回终端刷新二维码后重新扫码。", false)
 		return
 	}
-	renderSitePortalSelectionPage(c.Writer, portals.Portals, portals.DefaultPortalCode, entry.ExpiresAt)
+	renderSitePortalSelectionPage(c.Writer, entry.ID, portals.Portals, portals.DefaultPortalCode, entry.ExpiresAt)
 }
 
 type selectTerminalEntryRequest struct {
-	Entry string `json:"entry" binding:"required"`
+	Entry          string `json:"entry" binding:"required"`
+	EntrySessionID string `json:"entry_session_id" binding:"required"`
 }
 
 // SelectEntry creates a short lived T3 and hands it to the Portal in a form
@@ -133,7 +144,7 @@ func (h *TerminalTicketHandler) SelectEntry(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_terminal_entry"})
 		return
 	}
-	entry, portals, err := h.loadActiveEntry(c)
+	entry, portals, err := h.loadActiveEntry(c, strings.TrimSpace(req.EntrySessionID))
 	if err != nil {
 		c.JSON(http.StatusGone, gin.H{"error": "entry_invalid"})
 		return
@@ -166,12 +177,15 @@ func (h *TerminalTicketHandler) SelectEntry(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(renderPortalHandoffPage(portal.EntryURL, raw, attempt.ID)))
 }
 
-func (h *TerminalTicketHandler) loadActiveEntry(c *gin.Context) (*models.EntrySession, *models.EdgeSitePortalConfig, error) {
+func (h *TerminalTicketHandler) loadActiveEntry(c *gin.Context, entryID string) (*models.EntrySession, *models.EdgeSitePortalConfig, error) {
+	if strings.TrimSpace(entryID) == "" {
+		return nil, nil, database.ErrEntrySessionInvalid
+	}
 	raw, err := c.Cookie(entryCookie)
 	if err != nil || raw == "" {
 		return nil, nil, database.ErrEntrySessionInvalid
 	}
-	entry, err := h.entries.GetActiveByT2(ticketHash(raw), time.Now())
+	entry, err := h.entries.GetActiveByT2(ticketHash(raw), entryID, time.Now())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -226,7 +240,7 @@ func newEntrySecret() (string, string, error) {
 }
 func ticketHash(raw string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(raw))) }
 
-func renderSitePortalSelectionPage(w http.ResponseWriter, portals []*models.SitePortal, defaultCode string, _ time.Time) {
+func renderSitePortalSelectionPage(w http.ResponseWriter, entryID string, portals []*models.SitePortal, defaultCode string, _ time.Time) {
 	var options strings.Builder
 	for _, p := range portals {
 		defaultAttr := ""
@@ -235,17 +249,23 @@ func renderSitePortalSelectionPage(w http.ResponseWriter, portals []*models.Site
 		}
 		fmt.Fprintf(&options, `<button type="button" class="portal-option" data-entry="%s"%s><span class="portal-name">%s</span><span class="portal-arrow" aria-hidden="true">›</span></button>`, html.EscapeString(p.Code), defaultAttr, html.EscapeString(p.DisplayName))
 	}
+	title := "选择打印入口"
+	description := "请选择本次打印使用的入口。"
+	if len(portals) == 1 {
+		title = "正在进入打印入口"
+		description = "正在进入，请稍候…"
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>选择打印入口</title><style>`+entryPageStyle+`</style></head><body><main class="card" aria-labelledby="page-title"><p class="eyebrow">飞印打印</p><h1 id="page-title">选择打印入口</h1><p class="description">请选择本次打印使用的入口。</p><p class="status" role="status" aria-live="polite"></p><section class="portal-options" aria-label="打印入口">`+options.String()+`</section><p class="error" role="alert" aria-live="assertive"></p></main><script>(async()=>{const buttons=[...document.querySelectorAll('.portal-option')];const error=document.querySelector('.error');const status=document.querySelector('.status');let submitting=false;const fail=(message)=>{status.textContent='';error.textContent=message};for(const button of buttons)button.addEventListener('click',async()=>{if(submitting)return;submitting=true;buttons.forEach((item)=>{item.disabled=true});status.textContent='正在进入，请稍候…';try{const response=await fetch('/api/v1/public/terminal-entry/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entry:button.dataset.entry})});if(!response.ok){fail('入口已失效，请返回终端刷新二维码后重新扫码。');return}document.open();document.write(await response.text());document.close()}catch{fail('网络连接失败，请返回终端刷新二维码后重新扫码。')}})})()</script></body></html>`)
+	fmt.Fprint(w, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><title>`+html.EscapeString(title)+`</title><style>`+entryPageStyle+`</style></head><body><main class="card" aria-labelledby="page-title"><p class="eyebrow">飞印打印</p><h1 id="page-title">`+html.EscapeString(title)+`</h1><p class="description">`+html.EscapeString(description)+`</p><p class="status" role="status" aria-live="polite"></p><section class="portal-options" aria-label="打印入口">`+options.String()+`</section><p class="error" role="alert" aria-live="assertive"></p></main><script>(async()=>{const entrySessionId=`+strconv.Quote(entryID)+`;const buttons=[...document.querySelectorAll('.portal-option')];const error=document.querySelector('.error');const status=document.querySelector('.status');const options=document.querySelector('.portal-options');let submitting=false;const fail=(message)=>{status.textContent='';error.textContent=message;submitting=false;buttons.forEach((item)=>{item.disabled=false})};const submit=async(button)=>{if(submitting)return;submitting=true;buttons.forEach((item)=>{item.disabled=true});status.textContent='正在进入，请稍候…';try{const response=await fetch('/api/v1/public/terminal-entry/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entry:button.dataset.entry,entry_session_id:entrySessionId})});if(!response.ok){fail('入口已失效，请返回终端刷新二维码后重新扫码。');return}document.open();document.write(await response.text());document.close()}catch{fail('网络连接失败，请返回终端刷新二维码后重新扫码。')}};for(const button of buttons)button.addEventListener('click',()=>submit(button));if(buttons.length===1){if(options)options.hidden=true;await submit(buttons[0])}})()</script></body></html>`)
 }
 
 func renderPortalHandoffPage(entryURL, t3, attemptID string) string {
 	return `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><form id="handoff" method="post" action="` + html.EscapeString(entryURL) + `"><input type="hidden" name="handoff" value="` + html.EscapeString(t3) + `"><input type="hidden" name="attempt_id" value="` + html.EscapeString(attemptID) + `"></form><script>document.getElementById('handoff').submit()</script>`
 }
 
-const entryBootstrapPage = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>正在进入打印入口</title><style>` + entryPageStyle + `</style><main class="card"><h1>正在确认终端</h1><p id="message">请稍候…</p></main><script>(async()=>{const t=new URL(location.href).hash.match(/(?:^#|[&#])t=([^&]+)/)?.[1];history.replaceState(null,'','/entry');if(!t){document.getElementById('message').textContent='二维码无效，请返回终端刷新。';return}let r=await fetch('/api/v1/public/terminal-entry/acquire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:decodeURIComponent(t)})});if(!r.ok){document.getElementById('message').textContent='二维码已被使用，请在终端刷新。';return}for(;;){await new Promise(x=>setTimeout(x,700));r=await fetch('/api/v1/public/terminal-entry/status',{cache:'no-store'});if(r.status===202)continue;if(!r.ok){document.getElementById('message').textContent='终端会话已失效，请重新扫码。';return}location.replace('/entry/options');return}})()</script></html>`
-const entryPageStyle = `*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#f5f7fb;color:#172033;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;padding:20px}.card{width:min(440px,100%);background:#fff;border:1px solid #e4e8f0;border-radius:20px;padding:24px;box-shadow:0 12px 36px rgba(23,32,51,.08)}.eyebrow{margin:0 0 8px;color:#356ae6;font-size:13px;font-weight:700;letter-spacing:.04em}.card h1{margin:0;color:#172033;font-size:25px;line-height:1.3}.description{margin:8px 0 0;color:#667085;font-size:15px;line-height:1.6}.status{min-height:24px;margin:18px 0 0;color:#356ae6;font-size:14px}.status:empty{display:none}.portal-options{display:grid;gap:12px;margin-top:20px}.portal-option{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:64px;padding:16px;border:1px solid #d8deea;border-radius:14px;background:#fff;color:#172033;font:600 17px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s,box-shadow .15s,background .15s}.portal-option:active{background:#f5f8ff}.portal-option[data-default=true]{border-color:#356ae6;box-shadow:0 0 0 3px rgba(53,106,230,.1)}.portal-option:disabled{background:#f7f8fa;color:#98a2b3;cursor:wait;opacity:.75}.portal-option span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.portal-option span:last-child{margin-left:12px;color:#356ae6;font-size:24px;font-weight:400;line-height:1}.portal-option:disabled span:last-child{color:#98a2b3}.error{margin:16px 0 0;color:#ba1a1a;font-size:14px;line-height:1.6}@media (max-width:380px){body{padding:12px}.card{padding:20px;border-radius:16px}.card h1{font-size:23px}.portal-option{min-height:60px;padding:14px;font-size:16px}}`
+const entryBootstrapPage = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>正在进入打印入口</title><style>` + entryPageStyle + `</style><main class="card"><h1>正在确认终端</h1><p id="message">请稍候…</p></main><script>(async()=>{const t=new URL(location.href).hash.match(/(?:^#|[&#])t=([^&]+)/)?.[1];history.replaceState(null,'','/entry');if(!t){document.getElementById('message').textContent='二维码无效，请返回终端刷新。';return}let r=await fetch('/api/v1/public/terminal-entry/acquire',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket:decodeURIComponent(t)})});if(!r.ok){document.getElementById('message').textContent='二维码已被使用，请在终端刷新。';return}const acquired=await r.json().catch(()=>null);const entrySessionId=String(acquired?.entry_session_id||'').trim();if(!entrySessionId){document.getElementById('message').textContent='终端会话已失效，请重新扫码。';return}for(;;){await new Promise(x=>setTimeout(x,700));r=await fetch('/api/v1/public/terminal-entry/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({entry_session_id:entrySessionId}),cache:'no-store'});if(r.status===202)continue;if(!r.ok){document.getElementById('message').textContent='终端会话已失效，请重新扫码。';return}location.replace('/entry/options?entry_session_id='+encodeURIComponent(entrySessionId));return}})()</script></html>`
+const entryPageStyle = `*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#f5f7fb;color:#172033;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;align-items:center;justify-content:center;padding:20px}.card{width:min(440px,100%);background:#fff;border:1px solid #e4e8f0;border-radius:20px;padding:24px;box-shadow:0 12px 36px rgba(23,32,51,.08)}.eyebrow{margin:0 0 8px;color:#356ae6;font-size:13px;font-weight:700;letter-spacing:.04em}.card h1{margin:0;color:#172033;font-size:25px;line-height:1.3}.description{margin:8px 0 0;color:#667085;font-size:15px;line-height:1.6}.status{min-height:24px;margin:18px 0 0;color:#356ae6;font-size:14px}.status:empty{display:none}.portal-options{display:grid;gap:12px;margin-top:20px}.portal-options[hidden]{display:none}.portal-option{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:64px;padding:16px;border:1px solid #d8deea;border-radius:14px;background:#fff;color:#172033;font:600 17px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color .15s,box-shadow .15s,background .15s}.portal-option:active{background:#f5f8ff}.portal-option[data-default=true]{border-color:#356ae6;box-shadow:0 0 0 3px rgba(53,106,230,.1)}.portal-option:disabled{background:#f7f8fa;color:#98a2b3;cursor:wait;opacity:.75}.portal-option span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.portal-option span:last-child{margin-left:12px;color:#356ae6;font-size:24px;font-weight:400;line-height:1}.portal-option:disabled span:last-child{color:#98a2b3}.error{margin:16px 0 0;color:#ba1a1a;font-size:14px;line-height:1.6}@media (max-width:380px){body{padding:12px}.card{padding:20px;border-radius:16px}.card h1{font-size:23px}.portal-option{min-height:60px;padding:14px;font-size:16px}}`
 
 func renderEntryError(c *gin.Context, status int, title, message string, retry bool) {
 	c.Header("Cache-Control", "no-store")

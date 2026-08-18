@@ -29,6 +29,7 @@ func TestInitTablesOnFreshDatabase(t *testing.T) {
 	for _, tableName := range []string{
 		"edge_terminal_sessions",
 		"site_portals",
+		"site_portal_providers",
 		"print_quota_transactions",
 	} {
 		var exists bool
