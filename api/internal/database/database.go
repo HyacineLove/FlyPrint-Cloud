@@ -97,6 +97,7 @@ func (db *DB) InitTables() error {
 		username VARCHAR(50) UNIQUE NOT NULL,
 		email VARCHAR(100) UNIQUE NOT NULL,
 		password_hash VARCHAR(255) NOT NULL,
+		account_kind VARCHAR(20) NOT NULL DEFAULT 'operator',
 		role VARCHAR(20) NOT NULL DEFAULT 'viewer',
 		status VARCHAR(20) NOT NULL DEFAULT 'active',
 		last_login TIMESTAMP,

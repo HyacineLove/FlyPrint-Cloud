@@ -13,7 +13,8 @@ Go 控制面（Gin + PostgreSQL + WebSocket），独立 git 仓库。
 ## 协议与业务边界
 
 - WebSocket 权威消息定义在 `api/internal/websocket/message.go`；跨仓协议同步 `../../docs/protocol.md` 与 Edge consumer 测试。
-- 外部接入边界只有 Site Portal。仓内 Identity/PRP 位于 `fly-print-site-portal/site-set/`，由 Portal 启动配置决定是否拉起。Cloud 仓库不得再内嵌其源码或测试应用。
+- 外部接入边界只有 Site Portal。Identity 与长期文件 Provider 均为外部服务；Site Portal 和 Cloud 仓库都不内嵌其生产源码。相邻本地参考仓库只提供 Keycloak OIDC 演示，不提供 PRP。
+- 官方 `session-file-service` 是 Cloud 发布体系内的独立临时文件数据面：源码位于 `services/session-file-service/`，独立 Go module/镜像，不得导入 Cloud API业务包，也不得读取旧 Cloud文件表；外部只能由 Site Portal经 Nginx受保护路径调用。
 - OAuth 客户端类型只允许 `edge_node`、`site_portal`。Site Portal 使用 client credentials 获取 Bearer token。
 
 ## 数据库

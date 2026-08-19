@@ -16,17 +16,22 @@ BEGIN
   END IF;
 END $$;
 
+-- The legacy request table owns foreign keys to files and print_jobs. Capture
+-- the referenced IDs first, then remove the dependent tables before deleting
+-- their target rows so upgrades of populated databases remain transactional.
+DROP TABLE IF EXISTS integration_callback_events CASCADE;
+DROP TABLE IF EXISTS integration_print_requests CASCADE;
+DROP TABLE IF EXISTS integration_providers CASCADE;
+
 DELETE FROM print_quota_transactions
  WHERE print_job_id IN (SELECT id FROM flyprint_legacy_third_party_jobs);
+DELETE FROM edge_job_update_receipts
+ WHERE job_id IN (SELECT id FROM flyprint_legacy_third_party_jobs);
 DELETE FROM print_jobs
  WHERE id IN (SELECT id FROM flyprint_legacy_third_party_jobs);
 DELETE FROM files
  WHERE id IN (SELECT id FROM flyprint_legacy_third_party_files)
    AND NOT EXISTS (SELECT 1 FROM print_jobs WHERE print_jobs.local_file_id = files.id::text);
-
-DROP TABLE IF EXISTS integration_callback_events CASCADE;
-DROP TABLE IF EXISTS integration_print_requests CASCADE;
-DROP TABLE IF EXISTS integration_providers CASCADE;
 
 ALTER TABLE edge_terminal_sessions DROP COLUMN IF EXISTS integration_request_id;
 ALTER TABLE site_portals DROP COLUMN IF EXISTS api_token_hash;

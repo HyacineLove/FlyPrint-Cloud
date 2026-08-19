@@ -85,6 +85,67 @@ func TestUserHandlerUpdateRejectsEmailChange(t *testing.T) {
 	}
 }
 
+func TestUserHandlerCreateRejectsViewerAccount(t *testing.T) {
+	c, recorder := newUserHandlerTestContext(
+		http.MethodPost,
+		"/admin/users",
+		`{"email":"viewer@example.com","username":"viewer-user","password":"strong-password","role":"viewer"}`,
+	)
+	NewUserHandler(nil).CreateUser(c)
+
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "普通打印用户只能通过第三方 SSO 建立") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestUserHandlerUpdateRejectsExternalUserPrivilegeChange(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username, email, account_kind, role, status, print_quota_balance, last_login, created_at, updated_at
+		FROM users WHERE id = $1`)).
+		WithArgs("user-2").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "account_kind", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).
+			AddRow("user-2", "Alice", "alice@example.com", "external", "viewer", "active", 50, nil, now, now))
+
+	c, recorder := newUserHandlerTestContext(http.MethodPut, "/admin/users/user-2", `{"username":"Alice","role":"admin"}`)
+	NewUserHandler(database.NewUserRepository(&database.DB{DB: sqlDB})).UpdateUser(c)
+
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "SSO 用户角色不能修改为管理角色") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUserHandlerChangePasswordRejectsExternalUser(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	now := time.Now()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, username, email, account_kind, role, status, print_quota_balance, last_login, created_at, updated_at
+		FROM users WHERE id = $1 AND status = 'active'`)).
+		WithArgs("user-2").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "account_kind", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).
+			AddRow("user-2", "Alice", "alice@example.com", "external", "viewer", "active", 50, nil, now, now))
+
+	c, recorder := newUserHandlerTestContext(http.MethodPut, "/admin/users/user-2/password", `{"new_password":"Strong-password-123"}`)
+	NewUserHandler(database.NewUserRepository(&database.DB{DB: sqlDB})).ChangePassword(c)
+
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "SSO 用户不支持设置本地密码") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUserHandlerUpdateEnabledDisablesUser(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {
@@ -96,10 +157,10 @@ func TestUserHandlerUpdateEnabledDisablesUser(t *testing.T) {
 		UPDATE users
 		SET status = CASE WHEN $2 THEN 'active' ELSE 'inactive' END
 		WHERE id = $1
-		RETURNING id, username, email, role, status, print_quota_balance, last_login, created_at, updated_at`)).
+		RETURNING id, username, email, account_kind, role, status, print_quota_balance, last_login, created_at, updated_at`)).
 		WithArgs("user-2", false).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).
-			AddRow("user-2", "Alice", "alice@example.com", "viewer", "inactive", 50, nil, now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "username", "email", "account_kind", "role", "status", "print_quota_balance", "last_login", "created_at", "updated_at"}).
+			AddRow("user-2", "Alice", "alice@example.com", "external", "viewer", "inactive", 50, nil, now, now))
 
 	c, recorder := newUserHandlerTestContext(http.MethodPatch, "/admin/users/user-2/enabled", `{"enabled":false}`)
 	NewUserHandler(database.NewUserRepository(&database.DB{DB: sqlDB})).UpdateEnabled(c)
@@ -170,9 +231,9 @@ func TestUserHandlerGrantPrintQuotaReturnsUpdatedBalance(t *testing.T) {
 	mock.ExpectQuery("UPDATE users").
 		WithArgs(userID, 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "username", "email", "role", "status", "print_quota_balance",
+			"id", "username", "email", "account_kind", "role", "status", "print_quota_balance",
 			"last_login", "created_at", "updated_at",
-		}).AddRow(userID, "Alice", "alice@example.com", "viewer", "active", 70, nil, now, now))
+		}).AddRow(userID, "Alice", "alice@example.com", "external", "viewer", "active", 70, nil, now, now))
 	mock.ExpectExec("INSERT INTO print_quota_transactions").
 		WithArgs(userID, 20, 70, adminID, "demo allowance").
 		WillReturnResult(sqlmock.NewResult(0, 1))

@@ -75,8 +75,42 @@ func newSitePortalTestRouter(h *SitePortalHandler) *gin.Engine {
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set("client_type", "site_portal"); c.Set("site_portal_code", "official") })
 	r.POST("/context", h.Context)
+	r.POST("/complete", h.CompleteLogin)
 	r.POST("/claims/validate", h.ValidateClaim)
 	return r
+}
+
+func TestCompleteLoginPassesExplicitIdentityTuple(t *testing.T) {
+	now := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)
+	completer := &fakePortalLoginCompleter{completion: &models.PortalLoginCompletion{
+		CloudUserID: "cloud-user-1", NodeID: "node-1", TerminalSessionID: "session-1",
+		SitePortalCode: "official", SitePortalDisplayName: "FlyPrint",
+	}}
+	h := NewSitePortalHandler(
+		&fakeSitePortalAuthenticator{portal: &models.SitePortal{Code: "official", Enabled: true}},
+		&fakePortalEntries{}, completer, &fakePortalDispatcher{},
+	)
+	h.now = func() time.Time { return now }
+	body := bytes.NewBufferString(`{
+		"attempt_id":"attempt-1",
+		"identity_connector_id":"school-keycloak",
+		"issuer":"https://id.example.test/realms/flyprint/",
+		"subject":"subject-1",
+		"external_user_id":"subject-1",
+		"display_name":"张老师",
+		"claim_code":"claim-code-123456",
+		"claim_expires_at":"2026-08-19T10:03:00Z"
+	}`)
+	w := httptest.NewRecorder()
+	newSitePortalTestRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/complete", body))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if completer.input.IdentityConnectorID != "school-keycloak" ||
+		completer.input.Issuer != "https://id.example.test/realms/flyprint" ||
+		completer.input.Subject != "subject-1" {
+		t.Fatalf("identity tuple=%#v", completer.input)
+	}
 }
 
 func TestSitePortalContextConsumesOnlyHandoff(t *testing.T) {

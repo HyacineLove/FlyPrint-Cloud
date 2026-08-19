@@ -46,12 +46,17 @@ func (db *DB) initSitePortalSchema() error {
 		`CREATE TABLE IF NOT EXISTS external_identities (
 			site_portal_code VARCHAR(64) NOT NULL REFERENCES site_portals(code),
 			external_user_id VARCHAR(255) NOT NULL,
+			identity_connector_id VARCHAR(128) NOT NULL,
+			issuer VARCHAR(512) NOT NULL,
+			subject VARCHAR(255) NOT NULL,
 			cloud_user_id UUID NOT NULL REFERENCES users(id),
 			display_name VARCHAR(120) NOT NULL,
 			last_login_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY (site_portal_code, external_user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_external_identities_cloud_user ON external_identities(cloud_user_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_external_identities_principal
+			ON external_identities(identity_connector_id, issuer, subject)`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {

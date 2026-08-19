@@ -161,6 +161,10 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		BadRequestResponse(c, "请求参数无效")
 		return
 	}
+	if req.Role == "viewer" {
+		BadRequestResponse(c, "普通打印用户只能通过第三方 SSO 建立")
+		return
+	}
 
 	// 检查邮箱是否已存在
 	req.Email = security.NormalizeEmail(req.Email)
@@ -191,6 +195,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		Username:     strings.TrimSpace(req.Username),
 		Email:        req.Email,
 		PasswordHash: req.Password, // 在repository中会被加密
+		AccountKind:  "operator",
 		Role:         req.Role,
 		Status:       "active",
 	}
@@ -219,7 +224,6 @@ func (h *UserHandler) GetUser(c *gin.Context) {
 		NotFoundResponse(c, "用户不存在")
 		return
 	}
-
 	// 直接返回用户信息（敏感字段已过滤）
 	SuccessResponse(c, user)
 }
@@ -246,6 +250,14 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	user, err := h.userRepo.GetUserByIDAnyStatus(userID)
 	if err != nil {
 		NotFoundResponse(c, "用户不存在")
+		return
+	}
+	if user.AccountKind == "external" && req.Role != "viewer" {
+		BadRequestResponse(c, "SSO 用户角色不能修改为管理角色")
+		return
+	}
+	if user.AccountKind != "external" && req.Role == "viewer" {
+		BadRequestResponse(c, "普通打印用户只能通过第三方 SSO 建立")
 		return
 	}
 
@@ -365,10 +377,14 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	// 检查用户是否存在
-	_, err := h.userRepo.GetUserByID(userID)
+	// SSO 用户没有本地登录凭据，不能通过管理接口设置密码。
+	user, err := h.userRepo.GetUserByID(userID)
 	if err != nil {
 		NotFoundResponse(c, "用户不存在")
+		return
+	}
+	if user.AccountKind == "external" {
+		BadRequestResponse(c, "SSO 用户不支持设置本地密码")
 		return
 	}
 

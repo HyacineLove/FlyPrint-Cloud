@@ -48,7 +48,13 @@ services:
       - -c
       - >
         mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY must be set} ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be set} &&
-        mc mb --ignore-existing local/${MINIO_BUCKET:-fly-print-files}
+        mc mb --ignore-existing local/${MINIO_BUCKET:-fly-print-files} &&
+        mc mb --ignore-existing local/fly-print-session-files &&
+        (mc admin user info local ${SESSION_FILE_MINIO_ACCESS_KEY:?SESSION_FILE_MINIO_ACCESS_KEY must be set} >/dev/null 2>&1 || mc admin user add local ${SESSION_FILE_MINIO_ACCESS_KEY:?SESSION_FILE_MINIO_ACCESS_KEY must be set} ${SESSION_FILE_MINIO_SECRET_KEY:?SESSION_FILE_MINIO_SECRET_KEY must be set}) &&
+        (mc admin policy info local flyprint-session-files >/dev/null 2>&1 || mc admin policy create local flyprint-session-files /config/session-file-minio-policy.json) &&
+        mc admin policy attach local flyprint-session-files --user ${SESSION_FILE_MINIO_ACCESS_KEY:?SESSION_FILE_MINIO_ACCESS_KEY must be set}
+    volumes:
+      - ./session-file-minio-policy.json:/config/session-file-minio-policy.json:ro
     networks: [fly-print-network]
     restart: "no"
 
@@ -118,6 +124,43 @@ services:
     networks: [fly-print-network]
     restart: always
 
+  session-file-service:
+    image: ${SESSION_FILE_SERVICE_IMAGE_TAG:?SESSION_FILE_SERVICE_IMAGE_TAG must be set}
+    pull_policy: never
+    environment:
+      SESSION_FILE_LISTEN_PORT: 8080
+      SESSION_FILE_SIGN_SECRET: ${SESSION_FILE_SIGN_SECRET:?SESSION_FILE_SIGN_SECRET must be set}
+      SESSION_FILE_ALLOWED_CIDRS: ${SESSION_FILE_ALLOWED_CIDRS:?SESSION_FILE_ALLOWED_CIDRS must be set}
+      SESSION_FILE_TRUSTED_PROXY_CIDRS: ${SESSION_FILE_TRUSTED_PROXY_CIDRS:?SESSION_FILE_TRUSTED_PROXY_CIDRS must be set}
+      SESSION_FILE_MAX_TTL: ${SESSION_FILE_MAX_TTL:-1h}
+      SESSION_FILE_SWEEP_INTERVAL: ${SESSION_FILE_SWEEP_INTERVAL:-1m}
+      SESSION_FILE_MAX_FILE_SIZE: ${SESSION_FILE_MAX_FILE_SIZE:-20971520}
+      SESSION_FILE_MAX_FILES: ${SESSION_FILE_MAX_FILES:-10}
+      SESSION_FILE_MAX_TOTAL_BYTES: ${SESSION_FILE_MAX_TOTAL_BYTES:-83886080}
+      SESSION_FILE_MINIO_ENDPOINT: minio:9000
+      SESSION_FILE_MINIO_ACCESS_KEY: ${SESSION_FILE_MINIO_ACCESS_KEY:?SESSION_FILE_MINIO_ACCESS_KEY must be set}
+      SESSION_FILE_MINIO_SECRET_KEY: ${SESSION_FILE_MINIO_SECRET_KEY:?SESSION_FILE_MINIO_SECRET_KEY must be set}
+      SESSION_FILE_MINIO_BUCKET: fly-print-session-files
+      SESSION_FILE_MINIO_USE_SSL: "false"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    networks: [fly-print-network]
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,noexec,nosuid,size=32m"
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cpus: "1.0"
+    mem_limit: 256m
+    pids_limit: 128
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   nginx:
     image: nginx:1.27-alpine
     pull_policy: never
@@ -130,7 +173,7 @@ services:
       - ./nginx/includes:/etc/nginx/includes:ro
       - certbot_webroot:/var/www/certbot:ro
       - ./admin-built:/usr/share/nginx/html:ro
-    depends_on: [api]
+    depends_on: [api, session-file-service]
     networks: [fly-print-network]
     read_only: true
     tmpfs:

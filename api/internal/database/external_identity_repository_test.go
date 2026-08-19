@@ -39,15 +39,15 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT identity.cloud_user_id,user_account.status
 		FROM external_identities identity
 		JOIN users user_account ON user_account.id=identity.cloud_user_id
-		WHERE identity.site_portal_code=$1 AND identity.external_user_id=$2
+		WHERE identity.identity_connector_id=$1 AND identity.issuer=$2 AND identity.subject=$3
 		FOR UPDATE OF identity,user_account`)).
-		WithArgs("official", "external-user-1").
+		WithArgs("school-oidc", "https://id.example.test/realms/flyprint", "subject-1").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO users
-		(username,email,password_hash,role,status,last_login,print_quota_balance)
-		VALUES ($1,$2,$3,'viewer','active',$4,50)
+		(username,email,password_hash,account_kind,role,status,last_login,print_quota_balance)
+		VALUES ($1,$2,$3,'external','viewer','active',$4,50)
 		RETURNING id`)).
-		WithArgs("sp_321612b9d446bc5d4c63b324", "321612b9d446bc5d4c63b324@identity.flyprint.invalid", sqlmock.AnyArg(), now).
+		WithArgs("sp_6e9b1c12426e5a1097e8be0e", "6e9b1c12426e5a1097e8be0e@identity.flyprint.invalid", sqlmock.AnyArg(), now).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("cloud-user-1"))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO print_quota_transactions
 		(user_id,transaction_type,delta,balance_after)
@@ -55,9 +55,9 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 		WithArgs("cloud-user-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO external_identities
-		(site_portal_code,external_user_id,cloud_user_id,display_name,last_login_at)
-		VALUES ($1,$2,$3,$4,$5)`)).
-		WithArgs("official", "external-user-1", "cloud-user-1", "张老师", now).
+		(site_portal_code,external_user_id,identity_connector_id,issuer,subject,cloud_user_id,display_name,last_login_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`)).
+		WithArgs("official", "subject-1", "school-oidc", "https://id.example.test/realms/flyprint", "subject-1", "cloud-user-1", "张老师", now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta(`UPDATE edge_terminal_sessions
 		SET site_portal_code=$3,cloud_user_id=$4
@@ -74,9 +74,10 @@ func TestCompletePortalLoginCreatesMappingAndConsumesTicketInOneTransaction(t *t
 	mock.ExpectCommit()
 
 	completion, err := repo.CompleteLogin(CompletePortalLoginInput{
-		SitePortalCode: "official",
-		TicketHash:     "ticket-hash",
-		ExternalUserID: "external-user-1",
+		SitePortalCode:      "official",
+		TicketHash:          "ticket-hash",
+		IdentityConnectorID: "school-oidc", Issuer: "https://id.example.test/realms/flyprint", Subject: "subject-1",
+		ExternalUserID: "subject-1",
 		DisplayName:    "张老师",
 		ClaimCode:      "claim-code-123",
 		ClaimExpiresAt: expiresAt,
@@ -109,10 +110,10 @@ func TestCompletePortalLoginReusesExistingMapping(t *testing.T) {
 		}).AddRow("edge-1", "printer-1", "session-1", "official", "selected", now.Add(time.Minute),
 			"https://portal.example.test", "Official Portal", true))
 	mock.ExpectQuery("SELECT identity.cloud_user_id").
-		WithArgs("official", "external-user-1").
+		WithArgs("school-oidc", "https://id.example.test/realms/flyprint", "subject-1").
 		WillReturnRows(sqlmock.NewRows([]string{"cloud_user_id", "status"}).AddRow("cloud-user-existing", "active"))
 	mock.ExpectExec("UPDATE external_identities SET display_name").
-		WithArgs("official", "external-user-1", "张老师", now).
+		WithArgs("school-oidc", "https://id.example.test/realms/flyprint", "subject-1", "张老师", now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE users SET last_login").
 		WithArgs("cloud-user-existing", now).
@@ -126,9 +127,10 @@ func TestCompletePortalLoginReusesExistingMapping(t *testing.T) {
 	mock.ExpectCommit()
 
 	completion, err := repo.CompleteLogin(CompletePortalLoginInput{
-		SitePortalCode: "official",
-		TicketHash:     "ticket-hash",
-		ExternalUserID: "external-user-1",
+		SitePortalCode:      "official",
+		TicketHash:          "ticket-hash",
+		IdentityConnectorID: "school-oidc", Issuer: "https://id.example.test/realms/flyprint", Subject: "subject-1",
+		ExternalUserID: "subject-1",
 		DisplayName:    "张老师",
 		Now:            now,
 	})
@@ -158,14 +160,15 @@ func TestCompletePortalLoginRejectsInactiveMappedUserWithoutConsumingTicket(t *t
 		}).AddRow("edge-1", "printer-1", "session-1", "official", "selected", now.Add(time.Minute),
 			"https://portal.example.test", "Official Portal", true))
 	mock.ExpectQuery("SELECT identity.cloud_user_id").
-		WithArgs("official", "external-user-1").
+		WithArgs("school-oidc", "https://id.example.test/realms/flyprint", "subject-1").
 		WillReturnRows(sqlmock.NewRows([]string{"cloud_user_id", "status"}).AddRow("cloud-user-1", "inactive"))
 	mock.ExpectRollback()
 
 	_, err := repo.CompleteLogin(CompletePortalLoginInput{
-		SitePortalCode: "official",
-		TicketHash:     "ticket-hash",
-		ExternalUserID: "external-user-1",
+		SitePortalCode:      "official",
+		TicketHash:          "ticket-hash",
+		IdentityConnectorID: "school-oidc", Issuer: "https://id.example.test/realms/flyprint", Subject: "subject-1",
+		ExternalUserID: "subject-1",
 		DisplayName:    "张老师",
 		Now:            now,
 	})
@@ -191,9 +194,10 @@ func TestCompletePortalLoginRequiresEnabledEdgeAtConsumption(t *testing.T) {
 	mock.ExpectRollback()
 
 	_, err := repo.CompleteLogin(CompletePortalLoginInput{
-		SitePortalCode: "official",
-		TicketHash:     "ticket-hash",
-		ExternalUserID: "external-user-1",
+		SitePortalCode:      "official",
+		TicketHash:          "ticket-hash",
+		IdentityConnectorID: "school-oidc", Issuer: "https://id.example.test/realms/flyprint", Subject: "subject-1",
+		ExternalUserID: "subject-1",
 		DisplayName:    "张老师",
 		Now:            now,
 	})

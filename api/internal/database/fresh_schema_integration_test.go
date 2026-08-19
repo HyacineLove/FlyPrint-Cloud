@@ -62,4 +62,25 @@ func TestInitTablesOnFreshDatabase(t *testing.T) {
 	if legacyColumn {
 		t.Fatal("legacy integration_request_id column still exists")
 	}
+
+	for _, column := range []struct {
+		table string
+		name  string
+	}{
+		{table: "users", name: "account_kind"},
+		{table: "external_identities", name: "identity_connector_id"},
+		{table: "external_identities", name: "issuer"},
+		{table: "external_identities", name: "subject"},
+	} {
+		var exists bool
+		if err := sqlDB.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema='public' AND table_name=$1 AND column_name=$2
+		)`, column.table, column.name).Scan(&exists); err != nil {
+			t.Fatalf("check column %s.%s: %v", column.table, column.name, err)
+		}
+		if !exists {
+			t.Fatalf("column %s.%s was not created", column.table, column.name)
+		}
+	}
 }

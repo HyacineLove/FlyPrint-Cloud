@@ -54,11 +54,14 @@ type portalContextRequest struct {
 	Handoff string `json:"handoff" binding:"required"`
 }
 type completePortalLoginRequest struct {
-	AttemptID      string    `json:"attempt_id" binding:"required"`
-	ExternalUserID string    `json:"external_user_id" binding:"required"`
-	DisplayName    string    `json:"display_name" binding:"required"`
-	ClaimCode      string    `json:"claim_code" binding:"required"`
-	ClaimExpiresAt time.Time `json:"claim_expires_at" binding:"required"`
+	AttemptID           string    `json:"attempt_id" binding:"required"`
+	IdentityConnectorID string    `json:"identity_connector_id" binding:"required"`
+	Issuer              string    `json:"issuer" binding:"required"`
+	Subject             string    `json:"subject" binding:"required"`
+	ExternalUserID      string    `json:"external_user_id" binding:"required"`
+	DisplayName         string    `json:"display_name" binding:"required"`
+	ClaimCode           string    `json:"claim_code" binding:"required"`
+	ClaimExpiresAt      time.Time `json:"claim_expires_at" binding:"required"`
 }
 type validateClaimRequest struct {
 	ClaimCode         string `json:"claim_code" binding:"required"`
@@ -152,15 +155,18 @@ func (h *SitePortalHandler) CompleteLogin(c *gin.Context) {
 		return
 	}
 	in.AttemptID = strings.TrimSpace(in.AttemptID)
+	in.IdentityConnectorID = strings.TrimSpace(in.IdentityConnectorID)
+	in.Issuer = strings.TrimRight(strings.TrimSpace(in.Issuer), "/")
+	in.Subject = strings.TrimSpace(in.Subject)
 	in.ExternalUserID = strings.TrimSpace(in.ExternalUserID)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.ClaimCode = strings.TrimSpace(in.ClaimCode)
 	now := h.now()
-	if in.AttemptID == "" || len(in.ExternalUserID) > 255 || in.DisplayName == "" || len([]rune(in.DisplayName)) > 120 || len(in.ClaimCode) < 12 || len(in.ClaimCode) > 256 || !in.ClaimExpiresAt.After(now) || in.ClaimExpiresAt.After(now.Add(maxPortalClaimTTL)) {
+	if in.AttemptID == "" || in.IdentityConnectorID == "" || len(in.IdentityConnectorID) > 128 || in.Issuer == "" || len(in.Issuer) > 512 || in.Subject == "" || len(in.Subject) > 255 || len(in.ExternalUserID) > 255 || in.DisplayName == "" || len([]rune(in.DisplayName)) > 120 || len(in.ClaimCode) < 12 || len(in.ClaimCode) > 256 || !in.ClaimExpiresAt.After(now) || in.ClaimExpiresAt.After(now.Add(maxPortalClaimTTL)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_login_completion"})
 		return
 	}
-	completion, err := h.identities.CompleteLogin(database.CompletePortalLoginInput{SitePortalCode: p.Code, PortalAttemptID: in.AttemptID, ExternalUserID: in.ExternalUserID, DisplayName: in.DisplayName, ClaimCode: in.ClaimCode, ClaimExpiresAt: in.ClaimExpiresAt, Now: now})
+	completion, err := h.identities.CompleteLogin(database.CompletePortalLoginInput{SitePortalCode: p.Code, PortalAttemptID: in.AttemptID, IdentityConnectorID: in.IdentityConnectorID, Issuer: in.Issuer, Subject: in.Subject, ExternalUserID: in.ExternalUserID, DisplayName: in.DisplayName, ClaimCode: in.ClaimCode, ClaimExpiresAt: in.ClaimExpiresAt, Now: now})
 	if err != nil {
 		if errors.Is(err, database.ErrExternalIdentityDisabled) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "user_disabled"})

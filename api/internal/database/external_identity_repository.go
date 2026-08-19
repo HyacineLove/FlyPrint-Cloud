@@ -24,14 +24,17 @@ var (
 )
 
 type CompletePortalLoginInput struct {
-	SitePortalCode  string
-	TicketHash      string
-	PortalAttemptID string
-	ExternalUserID  string
-	DisplayName     string
-	ClaimCode       string
-	ClaimExpiresAt  time.Time
-	Now             time.Time
+	SitePortalCode      string
+	TicketHash          string
+	PortalAttemptID     string
+	IdentityConnectorID string
+	Issuer              string
+	Subject             string
+	ExternalUserID      string
+	DisplayName         string
+	ClaimCode           string
+	ClaimExpiresAt      time.Time
+	Now                 time.Time
 }
 
 type ExternalIdentityRepository struct {
@@ -62,9 +65,12 @@ func externalOnlyPasswordHash() (string, error) {
 
 func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInput) (*models.PortalLoginCompletion, error) {
 	input.SitePortalCode = strings.TrimSpace(input.SitePortalCode)
+	input.IdentityConnectorID = strings.TrimSpace(input.IdentityConnectorID)
+	input.Issuer = strings.TrimRight(strings.TrimSpace(input.Issuer), "/")
+	input.Subject = strings.TrimSpace(input.Subject)
 	input.ExternalUserID = strings.TrimSpace(input.ExternalUserID)
 	input.DisplayName = strings.TrimSpace(input.DisplayName)
-	if input.SitePortalCode == "" || (input.TicketHash == "" && input.PortalAttemptID == "") || input.ExternalUserID == "" ||
+	if input.SitePortalCode == "" || (input.TicketHash == "" && input.PortalAttemptID == "") || input.IdentityConnectorID == "" || input.Issuer == "" || input.Subject == "" || input.ExternalUserID == "" ||
 		input.DisplayName == "" || input.Now.IsZero() {
 		return nil, ErrPortalLoginTicketInvalid
 	}
@@ -129,24 +135,23 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 	if selectedEntry != input.SitePortalCode {
 		return nil, ErrPortalLoginPortalMismatch
 	}
-
 	var cloudUserID, userStatus string
 	err = tx.QueryRow(`SELECT identity.cloud_user_id,user_account.status
 		FROM external_identities identity
 		JOIN users user_account ON user_account.id=identity.cloud_user_id
-		WHERE identity.site_portal_code=$1 AND identity.external_user_id=$2
-		FOR UPDATE OF identity,user_account`, input.SitePortalCode, input.ExternalUserID).
+		WHERE identity.identity_connector_id=$1 AND identity.issuer=$2 AND identity.subject=$3
+		FOR UPDATE OF identity,user_account`, input.IdentityConnectorID, input.Issuer, input.Subject).
 		Scan(&cloudUserID, &userStatus)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		username, email := silentUserLogin(input.SitePortalCode, input.ExternalUserID)
+		username, email := silentUserLogin(input.IdentityConnectorID+"\x00"+input.Issuer, input.Subject)
 		passwordHash, hashErr := externalOnlyPasswordHash()
 		if hashErr != nil {
 			return nil, fmt.Errorf("create external-only password hash: %w", hashErr)
 		}
 		if err = tx.QueryRow(`INSERT INTO users
-			(username,email,password_hash,role,status,last_login,print_quota_balance)
-			VALUES ($1,$2,$3,'viewer','active',$4,50)
+			(username,email,password_hash,account_kind,role,status,last_login,print_quota_balance)
+			VALUES ($1,$2,$3,'external','viewer','active',$4,50)
 			RETURNING id`, username, email, passwordHash, input.Now).Scan(&cloudUserID); err != nil {
 			return nil, fmt.Errorf("create silently mapped user: %w", err)
 		}
@@ -156,9 +161,9 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 			return nil, fmt.Errorf("grant initial print quota: %w", err)
 		}
 		if _, err = tx.Exec(`INSERT INTO external_identities
-			(site_portal_code,external_user_id,cloud_user_id,display_name,last_login_at)
-			VALUES ($1,$2,$3,$4,$5)`,
-			input.SitePortalCode, input.ExternalUserID, cloudUserID, input.DisplayName, input.Now); err != nil {
+			(site_portal_code,external_user_id,identity_connector_id,issuer,subject,cloud_user_id,display_name,last_login_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			input.SitePortalCode, input.ExternalUserID, input.IdentityConnectorID, input.Issuer, input.Subject, cloudUserID, input.DisplayName, input.Now); err != nil {
 			return nil, fmt.Errorf("create external identity mapping: %w", err)
 		}
 	case err != nil:
@@ -166,9 +171,9 @@ func (r *ExternalIdentityRepository) CompleteLogin(input CompletePortalLoginInpu
 	case userStatus != "active":
 		return nil, ErrExternalIdentityDisabled
 	default:
-		if _, err = tx.Exec(`UPDATE external_identities SET display_name=$3,last_login_at=$4
-			WHERE site_portal_code=$1 AND external_user_id=$2`,
-			input.SitePortalCode, input.ExternalUserID, input.DisplayName, input.Now); err != nil {
+		if _, err = tx.Exec(`UPDATE external_identities SET display_name=$4,last_login_at=$5
+			WHERE identity_connector_id=$1 AND issuer=$2 AND subject=$3`,
+			input.IdentityConnectorID, input.Issuer, input.Subject, input.DisplayName, input.Now); err != nil {
 			return nil, fmt.Errorf("update external identity mapping: %w", err)
 		}
 		if _, err = tx.Exec(`UPDATE users SET last_login=$2 WHERE id=$1`, cloudUserID, input.Now); err != nil {

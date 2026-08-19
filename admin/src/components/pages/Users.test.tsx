@@ -11,7 +11,7 @@ const response = (data: unknown, ok = true) => ({
   json: async () => ({ code: ok ? 200 : 2006, data, message: ok ? '' : '用户存在打印中的任务，无法删除' }),
 }) as Response;
 
-const user = { id: 'user-1', username: 'Alice', email: 'alice@example.com', role: 'viewer', status: 'active', print_quota_balance: 50, last_login: '', created_at: '2026-07-27T00:00:00Z' };
+const user = { id: 'user-1', username: 'Alice', email: 'alice@example.com', account_kind: 'operator', role: 'operator', status: 'active', print_quota_balance: 50, last_login: '', created_at: '2026-07-27T00:00:00Z' };
 
 const buttonsByText = (text: string) => Array.from(document.querySelectorAll('button'))
   .filter((button) => button.textContent?.replace(/\s/g, '') === text);
@@ -105,5 +105,21 @@ describe('Users operations', () => {
     ));
     expect(screen.queryByText('减少额度')).not.toBeInTheDocument();
     expect(screen.queryByText('重置额度')).not.toBeInTheDocument();
+  });
+
+  it('does not expose local credentials or role editing for SSO users', async () => {
+    const externalUser = { ...user, account_kind: 'external', role: 'viewer' };
+    const fetchMock = jest.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/auth/me')) return response({ access_token: 'admin-token' });
+      if (url.includes('/admin/users')) return response({ items: [externalUser], pagination: { total: 1 } });
+      return response({});
+    });
+    global.fetch = fetchMock as jest.Mock;
+
+    render(<MemoryRouter><Users /></MemoryRouter>);
+    expect(await screen.findByText('SSO 打印用户')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '改密码' })).not.toBeInTheDocument();
   });
 });

@@ -25,15 +25,15 @@ func TestPrintQuotaRepositoryGrantUpdatesBalanceAndWritesAdminLedger(t *testing.
 	mock.ExpectQuery(regexp.QuoteMeta(`UPDATE users
 		SET print_quota_balance=print_quota_balance+$2
 		WHERE id=$1::uuid
-		RETURNING id::text,username,email,role,status,print_quota_balance,
+		RETURNING id::text,username,email,account_kind,role,status,print_quota_balance,
 			last_login,created_at,updated_at`)).
 		WithArgs("11111111-1111-1111-1111-111111111111", 20).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "username", "email", "role", "status", "print_quota_balance",
+			"id", "username", "email", "account_kind", "role", "status", "print_quota_balance",
 			"last_login", "created_at", "updated_at",
 		}).AddRow(
 			"11111111-1111-1111-1111-111111111111", "Alice", "alice@example.com",
-			"viewer", "active", 70, nil, now, now,
+			"external", "viewer", "active", 70, nil, now, now,
 		))
 	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO print_quota_transactions
 		(user_id,transaction_type,delta,balance_after,admin_user_id,reason)

@@ -12,6 +12,7 @@ mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd)"
 stage_dir="$(mktemp -d)"
 api_image="flyprint/cloud-api:${release_tag}"
+session_file_image="flyprint/session-file-service:${release_tag}"
 admin_image="flyprint/cloud-admin-builder:${release_tag}"
 container_name="flyprint-admin-export-${release_tag//[^a-zA-Z0-9_.-]/-}-$$"
 
@@ -59,6 +60,7 @@ if grep -qE '^(MINIO_PORT|MINIO_CONSOLE_PORT|REDIS_|SITE_PORTAL_API_TOKEN|INTEGR
 fi
 
 docker build --platform linux/amd64 -t "$api_image" ./api
+docker build --platform linux/amd64 -t "$session_file_image" ./services/session-file-service
 docker build --platform linux/amd64 -t "$admin_image" ./admin
 admin_container_id="$(docker create --name "$container_name" "$admin_image")"
 mkdir -p "$stage_dir/admin-built"
@@ -89,12 +91,14 @@ done
 
 cp .env.release.example "$stage_dir/.env.release.example"
 sed -i "s|^CLOUD_API_IMAGE_TAG=.*|CLOUD_API_IMAGE_TAG=${api_image}|" "$stage_dir/.env.release.example"
+sed -i "s|^SESSION_FILE_SERVICE_IMAGE_TAG=.*|SESSION_FILE_SERVICE_IMAGE_TAG=${session_file_image}|" "$stage_dir/.env.release.example"
 cp deploy/docker-compose.release.yml "$stage_dir/docker-compose.release.yml"
 cp deploy/docker-compose.release.certbot.yml "$stage_dir/docker-compose.certbot.yml"
 cp deploy/docker-compose.release.https.yml "$stage_dir/docker-compose.https.yml"
 cp deploy/PUBLIC-DEPLOYMENT.md "$stage_dir/README.md"
+cp deploy/session-file-minio-policy.json "$stage_dir/session-file-minio-policy.json"
 cp -R nginx "$stage_dir/nginx"
-docker image save -o "$stage_dir/docker-images-linux-amd64.tar" "$api_image" "${runtime_images[@]}"
+docker image save -o "$stage_dir/docker-images-linux-amd64.tar" "$api_image" "$session_file_image" "${runtime_images[@]}"
 
 (cd "$stage_dir" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 archive_path="$output_dir/flyprint-cloud-${release_tag}-offline-linux-amd64.zip"

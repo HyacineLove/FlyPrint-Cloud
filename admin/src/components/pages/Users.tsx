@@ -13,6 +13,7 @@ interface ManagedUser {
   id: string;
   username: string;
   email: string;
+  account_kind: 'operator' | 'external' | string;
   role: 'admin' | 'operator' | 'viewer' | string;
   status: 'active' | 'inactive' | string;
   last_login?: string;
@@ -32,6 +33,9 @@ const roleOptions = [
   { value: 'operator', label: '运维人员' },
   { value: 'viewer', label: '普通用户' },
 ];
+
+const operatorRoleOptions = roleOptions.filter((item) => item.value !== 'viewer');
+const accountKindLabel = (value: string) => value === 'external' ? 'SSO 打印用户' : '运维账号';
 
 const formatDate = (value?: string) => (value ? new Date(value).toLocaleString() : '-');
 
@@ -103,7 +107,7 @@ const Users: React.FC = () => {
   const openCreate = () => {
     setEditing(undefined);
     form.resetFields();
-    form.setFieldsValue({ email: '', username: '', password: '', role: 'viewer' });
+    form.setFieldsValue({ email: '', username: '', password: '', role: 'operator' });
     setFormVisible(true);
   };
 
@@ -214,10 +218,13 @@ const Users: React.FC = () => {
           <div className="inline-username-editor" ref={usernameEditorRef}>
             <Input autoFocus value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} onPressEnter={() => void saveUsername(user)} onKeyDown={(event) => { if (event.key === 'Escape') setEditingUsernameId(undefined); }} />
           </div>
-        ) : <Button type="text" onClick={() => startUsernameEdit(user)}>{user.username || '-'}</Button>}
+        ) : user.account_kind === 'external'
+          ? <span>{user.username || '-'}</span>
+          : <Button type="text" onClick={() => startUsernameEdit(user)}>{user.username || '-'}</Button>}
         id={user.id}
       />,
     },
+    { title: '账号类型', dataIndex: 'account_kind', width: 130, render: accountKindLabel },
     { title: '角色', dataIndex: 'role', sorter: true, render: (value: string) => roleOptions.find((item) => item.value === value)?.label || value },
     {
       title: '启用', dataIndex: 'status', width: 90, sorter: true,
@@ -233,8 +240,8 @@ const Users: React.FC = () => {
       render: (_, user) => (
         <Space>
           <Button icon={<EyeOutlined />} onClick={() => setDetailUser(user)}>详情</Button>
-          <Button icon={<EditOutlined />} onClick={() => openEdit(user)}>编辑</Button>
-          <Button icon={<KeyOutlined />} onClick={() => { setPasswordUser(user); passwordForm.resetFields(); setPasswordVisible(true); }}>改密码</Button>
+          {user.account_kind !== 'external' ? <Button icon={<EditOutlined />} onClick={() => openEdit(user)}>编辑</Button> : null}
+          {user.account_kind !== 'external' ? <Button icon={<KeyOutlined />} onClick={() => { setPasswordUser(user); passwordForm.resetFields(); setPasswordVisible(true); }}>改密码</Button> : null}
           <Button onClick={() => {
             setQuotaUser(user);
             quotaForm.resetFields();
@@ -249,8 +256,8 @@ const Users: React.FC = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div><h2 style={{ marginBottom: 4 }}>用户管理</h2><span style={{ color: '#666' }}>邮箱是不可修改的登录标识；用户名可直接点击修改。</span></div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建用户</Button>
+        <div><h2 style={{ marginBottom: 4 }}>用户管理</h2><span style={{ color: '#666' }}>普通打印用户由第三方 SSO 自动建立；此处只能新建运维账号。</span></div>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建运维账号</Button>
       </div>
       <Space wrap style={{ marginBottom: 16 }}>
         <Input.Search value={search} allowClear placeholder="搜索邮箱或用户名" onChange={(event) => setSearch(event.target.value)} onSearch={() => reload()} style={{ width: 260 }} />
@@ -263,6 +270,7 @@ const Users: React.FC = () => {
         {detailUser ? <Descriptions column={1} size="small" bordered>
           <Descriptions.Item label="邮箱"><Link to={`/print-jobs?user_email=${encodeURIComponent(detailUser.email)}`}>{detailUser.email}</Link></Descriptions.Item>
           <Descriptions.Item label="用户名">{detailUser.username || '-'}</Descriptions.Item>
+          <Descriptions.Item label="账号类型">{accountKindLabel(detailUser.account_kind)}</Descriptions.Item>
           <Descriptions.Item label="角色">{roleOptions.find((item) => item.value === detailUser.role)?.label || detailUser.role}</Descriptions.Item>
           <Descriptions.Item label="状态">{detailUser.status === 'active' ? '启用' : '停用'}</Descriptions.Item>
           <Descriptions.Item label="最后登录">{formatDate(detailUser.last_login)}</Descriptions.Item>
@@ -276,7 +284,7 @@ const Users: React.FC = () => {
           <Form.Item name="email" label="邮箱" rules={[{ required: !editing, type: 'email', message: '请输入有效的邮箱' }]}>{editing ? <Input disabled /> : <Input type="email" autoComplete="email" />}</Form.Item>
           <Form.Item name="username" label="用户名" rules={[{ required: true, min: 3, max: 50, message: '用户名长度为 3-50 个字符' }]}><Input autoComplete="username" /></Form.Item>
           {!editing ? <Form.Item name="password" label="初始密码" rules={[{ required: true, min: 6, message: '密码至少需要 6 个字符' }]}><Input.Password autoComplete="new-password" /></Form.Item> : null}
-          <Form.Item name="role" label="角色" rules={[{ required: true }]}><Select options={roleOptions} /></Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true }]}><Select options={operatorRoleOptions} /></Form.Item>
         </Form>
       </Modal>
 

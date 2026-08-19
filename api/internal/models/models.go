@@ -173,6 +173,7 @@ type User struct {
 	Email             string    `json:"email"`                 // 邮箱
 	PasswordHash      string    `json:"-"`                     // 密码哈希 (不返回)
 	ExternalID        *string   `json:"external_id,omitempty"` // OAuth2 外部ID
+	AccountKind       string    `json:"account_kind"`          // operator / external
 	Role              string    `json:"role"`                  // 角色: admin/operator/viewer
 	Status            string    `json:"status"`                // 状态: active/inactive
 	PrintQuotaBalance int       `json:"print_quota_balance"`   // Cloud 管理的剩余打印额度点数

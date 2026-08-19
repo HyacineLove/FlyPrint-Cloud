@@ -40,7 +40,7 @@ func (r *PrintQuotaRepository) Grant(
 	var localAdminUserID string
 	// Cloud Admin 的内置登录 Token subject 就是 users.id。
 	// 外部身份映射独立存放在 external_identities，不存在 users.external_id 列。
-	err = tx.QueryRow(`SELECT id::text FROM users WHERE id::text=$1 AND role='admin'`, adminUserID).Scan(&localAdminUserID)
+	err = tx.QueryRow(`SELECT id::text FROM users WHERE id::text=$1 AND account_kind='operator' AND role='admin'`, adminUserID).Scan(&localAdminUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrPrintQuotaGrantInvalid
 	}
@@ -53,11 +53,11 @@ func (r *PrintQuotaRepository) Grant(
 	err = tx.QueryRow(`UPDATE users
 		SET print_quota_balance=print_quota_balance+$2
 		WHERE id=$1::uuid
-		RETURNING id::text,username,email,role,status,print_quota_balance,
+		RETURNING id::text,username,email,account_kind,role,status,print_quota_balance,
 			last_login,created_at,updated_at`,
 		userID, amount,
 	).Scan(
-		&user.ID, &user.Username, &user.Email, &user.Role, &user.Status,
+		&user.ID, &user.Username, &user.Email, &user.AccountKind, &user.Role, &user.Status,
 		&user.PrintQuotaBalance, &lastLogin, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
